@@ -334,7 +334,7 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, limit_memory, restrict_network, prompt_assert, and init_config."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, limit_memory, restrict_network, prompt_assert, init_config, restrict_fs, and FilesystemViolationError."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
@@ -351,6 +351,8 @@ def test_package_exports():
     assert hasattr(agent_shield, "prompt_assert")
     assert hasattr(agent_shield, "PromptAssertionError")
     assert hasattr(agent_shield, "init_config")
+    assert hasattr(agent_shield, "restrict_fs")
+    assert hasattr(agent_shield, "FilesystemViolationError")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
@@ -367,6 +369,8 @@ def test_package_exports():
     assert agent_shield.prompt_assert is not None
     assert agent_shield.PromptAssertionError is not None
     assert agent_shield.init_config is not None
+    assert agent_shield.restrict_fs is not None
+    assert agent_shield.FilesystemViolationError is not None
 
 
 def test_prompt_inject_modifies_docstring():
@@ -794,6 +798,85 @@ rules:
         import agent_shield.config
         agent_shield.config._hook_applied = False
         agent_shield.config._decorated_modules.clear()
+
+
+def test_restrict_fs_blocks_unauthorized_write(tmp_path):
+    """Verifies that writing to a non-whitelisted path raises FilesystemViolationError."""
+    from agent_shield import restrict_fs, FilesystemViolationError
+    
+    allowed_dir = str(tmp_path / "allowed")
+    os.makedirs(allowed_dir, exist_ok=True)
+    
+    unauthorized_file = str(tmp_path / "secret.txt")
+    
+    @restrict_fs(allow_write=[allowed_dir])
+    def do_file_write():
+        with open(unauthorized_file, "w") as f:
+            f.write("confidential")
+            
+    with pytest.raises(FilesystemViolationError) as exc_info:
+        do_file_write()
+        
+    assert "attempted unauthorized 'write' to path" in str(exc_info.value)
+    assert "secret.txt" in str(exc_info.value)
+    
+    # Verify report was generated
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["violation_type"] == "filesystem_violation"
+    assert report["function_name"] == "do_file_write"
+
+
+def test_restrict_fs_allows_authorized_write(tmp_path):
+    """Verifies that writing to an allowed path succeeds."""
+    from agent_shield import restrict_fs
+    
+    allowed_dir = str(tmp_path / "allowed")
+    os.makedirs(allowed_dir, exist_ok=True)
+    
+    allowed_file = str(tmp_path / "allowed" / "test.txt")
+    
+    @restrict_fs(allow_write=[allowed_dir])
+    def do_file_write():
+        with open(allowed_file, "w") as f:
+            f.write("permitted content")
+        return "written"
+        
+    assert do_file_write() == "written"
+    with open(allowed_file, "r") as f:
+        assert f.read() == "permitted content"
+
+
+def test_passive_shield_mode_logs_without_exception():
+    """Verifies that when AGENT_SHIELD_PASSIVE is active, violations do not raise exceptions."""
+    from agent_shield.contracts import shield, ShieldViolationError
+    
+    # Enable passive mode
+    os.environ["AGENT_SHIELD_PASSIVE"] = "true"
+    try:
+        # Define a function containing a forbidden import
+        # It should execute without raising an error
+        @shield(forbidden_imports=["sys"])
+        def func_with_sys_import():
+            import sys
+            return "system-ok"
+            
+        # The function runs fine even though sys is forbidden
+        assert func_with_sys_import() == "system-ok"
+        
+        # Verify JSON report was still generated
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+        assert os.path.exists(report_path)
+        with open(report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+        assert report["violation_type"] == "forbidden_import"
+    finally:
+        # Disable passive mode
+        os.environ.pop("AGENT_SHIELD_PASSIVE", None)
 
 
 

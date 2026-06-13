@@ -29,6 +29,11 @@ class PromptAssertionError(ShieldViolationError):
     pass
 
 
+class FilesystemViolationError(ShieldViolationError):
+    """Exception raised when function attempts an unauthorized filesystem operation."""
+    pass
+
+
 def _is_matching_type(value: typing.Any, expected_type: typing.Any) -> bool:
     """Helper to check if a value matches the expected type annotation."""
     if expected_type is inspect.Signature.empty:
@@ -106,7 +111,12 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imp
         report_path = os.path.join(reports_dir, "violation_report.json")
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
-        raise ShieldViolationError(error_msg)
+            
+        is_passive = os.environ.get("AGENT_SHIELD_PASSIVE", "").lower() in ("true", "1")
+        if is_passive:
+            print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
+        else:
+            raise ShieldViolationError(error_msg)
 
     # 1. Forbidden Imports Check
     if forbidden_imports:
@@ -243,10 +253,15 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imp
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
                 
-            raise ShieldViolationError(
+            error_msg = (
                 f"Function '{func.__name__}' returned type '{actual_name}' "
                 f"instead of expected '{expected_name}'."
             )
+            is_passive = os.environ.get("AGENT_SHIELD_PASSIVE", "").lower() in ("true", "1")
+            if is_passive:
+                print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
+            else:
+                raise ShieldViolationError(error_msg)
             
         return result
     return wrapper

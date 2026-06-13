@@ -106,6 +106,13 @@ def _apply_rules_to_module(module, module_name, rules):
                     if "forbidden_imports" in rule:
                         from agent_shield.contracts import shield
                         decorated = shield(forbidden_imports=rule["forbidden_imports"])(decorated)
+                        
+                    if "allow_read" in rule or "allow_write" in rule:
+                        from agent_shield.fs_sandbox import restrict_fs
+                        decorated = restrict_fs(
+                            allow_read=rule.get("allow_read"),
+                            allow_write=rule.get("allow_write")
+                        )(decorated)
                 try:
                     setattr(module, attr_name, decorated)
                 except Exception:

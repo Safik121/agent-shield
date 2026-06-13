@@ -125,10 +125,15 @@ def prompt_assert(prompt: str):
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
                 
-            raise PromptAssertionError(
+            error_msg = (
                 f"Function '{func_name}' violated semantic constraint: \"{prompt}\". "
                 f"Reason: {reason}"
             )
+            is_passive = os.environ.get("AGENT_SHIELD_PASSIVE", "").lower() in ("true", "1")
+            if is_passive:
+                print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
+            else:
+                raise PromptAssertionError(error_msg)
 
         return func
     return decorator
