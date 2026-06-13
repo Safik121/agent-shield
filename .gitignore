@@ -15,3 +15,9 @@ ENV/
 
 # Výstupy naší knihovny
 shield_reports/
+
+# Python build and distribution
+dist/
+build/
+*.egg-info/
+test_dummy_*

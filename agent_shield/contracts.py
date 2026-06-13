@@ -65,6 +65,16 @@ class EnvironmentViolationError(ShieldViolationError):
     pass
 
 
+class DatabaseViolationError(ShieldViolationError):
+    """Exception raised when function attempts unauthorized or destructive database operations."""
+    pass
+
+
+class PromptInjectionViolationError(ShieldViolationError):
+    """Exception raised when prompt injection signatures are detected in arguments or results."""
+    pass
+
+
 def _is_matching_type(value: typing.Any, expected_type: typing.Any) -> bool:
     """Helper to check if a value matches the expected type annotation."""
     if expected_type is inspect.Signature.empty:

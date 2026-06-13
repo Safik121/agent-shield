@@ -139,6 +139,18 @@ def _apply_rules_to_module(module, module_name, rules):
                     if "restrict_env" in rule and rule["restrict_env"]:
                         from agent_shield.contracts import restrict_env
                         decorated = restrict_env(allow_mutation=False)(decorated)
+
+                    if "virtual_fs" in rule and rule["virtual_fs"]:
+                        from agent_shield.virtual_fs import virtual_fs
+                        decorated = virtual_fs(in_memory_write=True)(decorated)
+
+                    if "guard_prompt" in rule and rule["guard_prompt"]:
+                        from agent_shield.prompt_guard import guard_prompt
+                        decorated = guard_prompt(scan_input=True)(decorated)
+
+                    if "restrict_db" in rule and rule["restrict_db"]:
+                        from agent_shield.db_sandbox import restrict_db
+                        decorated = restrict_db(read_only=True)(decorated)
                 try:
                     setattr(module, attr_name, decorated)
                 except Exception:
