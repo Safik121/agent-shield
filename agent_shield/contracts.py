@@ -9,6 +9,11 @@ class ShieldViolationError(Exception):
     pass
 
 
+class TimeoutViolationError(ShieldViolationError):
+    """Exception raised when function execution exceeds the allocated time limit."""
+    pass
+
+
 def _is_matching_type(value: typing.Any, expected_type: typing.Any) -> bool:
     """Helper to check if a value matches the expected type annotation."""
     if expected_type is inspect.Signature.empty:
@@ -39,11 +44,11 @@ def _get_type_name(t: typing.Any) -> str:
     return str(t)
 
 
-def shield(forbidden_imports: list[str] = None, allow_unsafe: bool = False, allow_globals: bool = False):
+def shield(forbidden_imports: list[str] = None, allow_unsafe: bool = False, allow_globals: bool = False, allowed_imports: list[str] = None):
     """Decorator to enforce function contract boundaries.
     
     Supports:
-    - Definition-time: AST analysis for forbidden imports, dangerous functions (eval/exec), and global scope usage.
+    - Definition-time: AST analysis for forbidden imports, allowed imports, dangerous functions (eval/exec), and global scope usage.
     - Runtime: Return type validation against type hints.
     
     Usage:
@@ -53,15 +58,15 @@ def shield(forbidden_imports: list[str] = None, allow_unsafe: bool = False, allo
     # Handle usage without parentheses: @shield
     if callable(forbidden_imports):
         func = forbidden_imports
-        return _decorator(func, None, False, False)
+        return _decorator(func, None, False, False, None)
         
     def decorator(func):
-        return _decorator(func, forbidden_imports, allow_unsafe, allow_globals)
+        return _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imports)
         
     return decorator
 
 
-def _decorator(func, forbidden_imports, allow_unsafe, allow_globals):
+def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imports):
     # Locate project root and prepare reports directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
@@ -101,6 +106,22 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals):
                     f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
                     f"contains forbidden imports: {', '.join(violations)}. "
                     f"Please refactor the code to remove these imports or utilize allowed alternatives."
+                )
+            )
+
+    # 1.5. Allowed Imports Check (Whitelist)
+    if allowed_imports is not None:
+        from agent_shield.inspector import find_disallowed_imports
+        violations = find_disallowed_imports(func, allowed_imports)
+        if violations:
+            report_and_raise(
+                violation_type="disallowed_import",
+                details={"disallowed_imports": violations},
+                error_msg=f"Function '{func.__name__}' contains disallowed imports: {', '.join(violations)}",
+                instruction=(
+                    f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                    f"contains disallowed imports: {', '.join(violations)}. "
+                    f"Please refactor the code to only use whitelisted imports: {', '.join(allowed_imports)}."
                 )
             )
 

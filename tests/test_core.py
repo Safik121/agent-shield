@@ -525,4 +525,63 @@ def test_mock_only_passes_if_properly_mocked():
         assert module_level_mock_only_func() == "mocked-value"
 
 
+def test_shield_allowed_imports_whitelist():
+    """Verifies that only modules in allowed_imports whitelist can be imported."""
+    # Importing math which is whitelisted should pass
+    @shield(allowed_imports=["math"])
+    def import_allowed():
+        import math
+        return math.sqrt(4)
+        
+    assert import_allowed() == 2.0
+    
+    # Importing os which is NOT whitelisted should fail
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @shield(allowed_imports=["math"])
+        def import_disallowed():
+            import os
+            return os.name
+            
+    assert "contains disallowed imports: os" in str(exc_info.value)
+    
+    # Verify the JSON report was generated
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["violation_type"] == "disallowed_import"
+    assert report["function_name"] == "import_disallowed"
+    assert "os" in report["details"]["disallowed_imports"]
+
+
+def test_timeout_raises_error():
+    """Verifies that @timeout raises TimeoutViolationError when function execution takes too long."""
+    import time
+    from agent_shield import timeout, TimeoutViolationError
+
+    @timeout(0.1)
+    def slow_function():
+        time.sleep(0.5)
+        return "done"
+
+    with pytest.raises(TimeoutViolationError) as exc_info:
+        slow_function()
+
+    assert "execution timed out after 0.1 seconds" in str(exc_info.value)
+
+
+def test_timeout_passes_within_limit():
+    """Verifies that functions executing within the limit pass successfully."""
+    from agent_shield import timeout
+    import time
+
+    @timeout(0.5)
+    def fast_function():
+        time.sleep(0.05)
+        return "success"
+
+    assert fast_function() == "success"
+
+
 

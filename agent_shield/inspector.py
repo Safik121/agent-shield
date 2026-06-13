@@ -198,3 +198,53 @@ def detect_cpu_lockups(func: typing.Callable) -> bool:
     return False
 
 
+def find_disallowed_imports(func: typing.Callable, allowed_modules: list[str]) -> list[str]:
+    """Analyzes the AST of a function to detect imports NOT present in allowed_modules.
+    
+    Args:
+        func: The function to analyze.
+        allowed_modules: A list of whitelisted module names (e.g. ['math', 'json']).
+        
+    Returns:
+        A list of disallowed module names that were imported inside the function.
+    """
+    if allowed_modules is None:
+        return []
+
+    try:
+        source = inspect.getsource(func)
+        dedented_source = textwrap.dedent(source)
+        tree = ast.parse(dedented_source)
+    except Exception:
+        return []
+
+    disallowed_imports = set()
+
+    def is_allowed(module_name: str) -> bool:
+        if not module_name:
+            return True
+        parts = module_name.split('.')
+        prefix = ""
+        for part in parts:
+            prefix = f"{prefix}.{part}" if prefix else part
+            if prefix in allowed_modules:
+                return True
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if not is_allowed(alias.name):
+                    disallowed_imports.add(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            # Allow relative imports by default
+            if node.level > 0:
+                continue
+            if node.module:
+                if not is_allowed(node.module):
+                    disallowed_imports.add(node.module)
+
+    return sorted(list(disallowed_imports))
+
+
+
