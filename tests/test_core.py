@@ -276,6 +276,58 @@ def test_enterprise_flags_allow_execution():
     assert allowed_enterprise_func() == {"status": "ok"}
 
 
+def test_freeze_decorator():
+    """Verifies that @freeze registers a function hash and blocks modifications with ShieldViolationError."""
+    from agent_shield.freezer import freeze
+
+    # 1. Clean the key from lockfile if it exists
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    lockfile_path = os.path.join(project_root, "shield_reports", "frozen_functions.json")
+    
+    if os.path.exists(lockfile_path):
+        try:
+            with open(lockfile_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                data = json.loads(content) if content else {}
+        except Exception:
+            data = {}
+        data.pop("my_frozen_function", None)
+        with open(lockfile_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            
+    # 2. Define a function and freeze it
+    @freeze
+    def my_frozen_function():
+        return "original"
+        
+    # Check that it is registered
+    assert os.path.exists(lockfile_path)
+    with open(lockfile_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert "my_frozen_function" in data
+    
+    # 3. Modify the hash in the lockfile to simulate an unauthorized change
+    data["my_frozen_function"] = "fake-different-hash"
+    with open(lockfile_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        
+    # 4. Try defining the function again and verify it raises ShieldViolationError
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @freeze
+        def my_frozen_function():
+            return "original"
+            
+    assert "Function 'my_frozen_function' is frozen by the architect and cannot be modified" in str(exc_info.value)
+    
+    # Cleanup
+    with open(lockfile_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.pop("my_frozen_function", None)
+    with open(lockfile_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+
 
 
 
