@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-shield"
+name = "pyagent-shield"
 version = "1.0.0"
 description = "A runtime and definition-time security guardrail framework for AI agents and developers."
 readme = "README.md"
@@ -27,3 +27,7 @@ dev = [
 
 [project.scripts]
 agent-shield = "agent_shield.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_shield"]
+
