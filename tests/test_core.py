@@ -1,6 +1,7 @@
 import pytest
 import os
 import json
+import subprocess
 from agent_shield.contracts import shield, ShieldViolationError
 from agent_shield.sandbox import mock_only
 
@@ -1066,6 +1067,113 @@ def test_cli_whitelist_updates_existing_yaml(monkeypatch, tmp_path):
     
     # Check that the violation report was deleted
     assert not report_file.exists()
+
+
+def test_restrict_subprocess_allowed():
+    """Verifies that allowed subprocess commands run successfully."""
+    import sys
+    from agent_shield import restrict_subprocess
+    
+    exe_name = os.path.basename(sys.executable)
+    
+    @restrict_subprocess(allow_commands=[exe_name])
+    def run_allowed():
+        res = subprocess.run([sys.executable, "-c", "print('hello_sandbox')"], capture_output=True, text=True)
+        return res.stdout.strip()
+        
+    assert run_allowed() == "hello_sandbox"
+
+
+def test_restrict_subprocess_forbidden():
+    """Verifies that running a forbidden command raises SubprocessViolationError."""
+    import sys
+    from agent_shield import restrict_subprocess, SubprocessViolationError
+    
+    @restrict_subprocess(allow_commands=["some_other_exe"])
+    def run_forbidden():
+        subprocess.run([sys.executable, "-c", "print('hello')"])
+        
+    with pytest.raises(SubprocessViolationError) as exc_info:
+        run_forbidden()
+        
+    assert "execution of" in str(exc_info.value)
+
+
+def test_restrict_subprocess_shell_forbidden():
+    """Verifies that chaining a forbidden command inside shell runs is detected and blocked."""
+    import sys
+    from agent_shield import restrict_subprocess, SubprocessViolationError
+    
+    exe_name = os.path.basename(sys.executable)
+    
+    @restrict_subprocess(allow_commands=[exe_name])
+    def run_shell_chained():
+        subprocess.run(f"{sys.executable} -c 'print()' && bad_command", shell=True)
+        
+    with pytest.raises(SubprocessViolationError) as exc_info:
+        run_shell_chained()
+        
+    assert "bad_command" in str(exc_info.value) or "sh" in str(exc_info.value) or "bash" in str(exc_info.value)
+
+
+def test_restrict_subprocess_os_system():
+    """Verifies that os.system is intercepted and checked."""
+    from agent_shield import restrict_subprocess, SubprocessViolationError
+    
+    @restrict_subprocess(allow_commands=["echo"])
+    def run_system_forbidden():
+        os.system("some_unknown_command")
+        
+    with pytest.raises(SubprocessViolationError) as exc_info:
+        run_system_forbidden()
+        
+    assert "some_unknown_command" in str(exc_info.value)
+
+
+def test_restrict_subprocess_yaml_config(tmp_path):
+    """Verifies that restrict_subprocess can be configured via shield.yaml."""
+    import sys
+    from agent_shield.config import init_config
+    from agent_shield import SubprocessViolationError
+    
+    dummy_code = """
+import subprocess
+import sys
+
+def run_cmd():
+    subprocess.run([sys.executable, "-c", "print('yaml_sandbox')"], capture_output=True, text=True)
+"""
+    dummy_file = tmp_path / "sub_dummy.py"
+    dummy_file.write_text(dummy_code)
+    
+    sys.path.insert(0, str(tmp_path))
+    
+    config_yaml = """
+rules:
+  - pattern: "sub_dummy"
+    restrict_subprocess: ["not_python"]
+"""
+    yaml_file = tmp_path / "shield.yaml"
+    yaml_file.write_text(config_yaml)
+    
+    try:
+        sys.modules.pop("sub_dummy", None)
+        init_config(config_path=str(yaml_file))
+        
+        import sub_dummy
+        
+        with pytest.raises(SubprocessViolationError):
+            sub_dummy.run_cmd()
+    finally:
+        sys.path.remove(str(tmp_path))
+        sys.modules.pop("sub_dummy", None)
+        import builtins
+        from agent_shield.config import _original_import
+        builtins.__import__ = _original_import
+        import agent_shield.config
+        agent_shield.config._hook_applied = False
+        agent_shield.config._decorated_modules.clear()
+
 
 
 

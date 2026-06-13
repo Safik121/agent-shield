@@ -44,6 +44,11 @@ class ComplexityViolationError(ShieldViolationError):
     pass
 
 
+class SubprocessViolationError(ShieldViolationError):
+    """Exception raised when function attempts an unauthorized subprocess execution."""
+    pass
+
+
 def _is_matching_type(value: typing.Any, expected_type: typing.Any) -> bool:
     """Helper to check if a value matches the expected type annotation."""
     if expected_type is inspect.Signature.empty:

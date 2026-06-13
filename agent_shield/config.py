@@ -121,6 +121,10 @@ def _apply_rules_to_module(module, module_name, rules):
                     if "no_side_effects" in rule and rule["no_side_effects"]:
                         from agent_shield.side_effects import no_side_effects
                         decorated = no_side_effects(decorated)
+                        
+                    if "restrict_subprocess" in rule:
+                        from agent_shield.subprocess_sandbox import restrict_subprocess
+                        decorated = restrict_subprocess(rule["restrict_subprocess"])(decorated)
                 try:
                     setattr(module, attr_name, decorated)
                 except Exception:

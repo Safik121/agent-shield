@@ -1,4 +1,4 @@
-from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError, PromptAssertionError, FilesystemViolationError, SideEffectViolationError, ComplexityViolationError
+from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError, PromptAssertionError, FilesystemViolationError, SideEffectViolationError, ComplexityViolationError, SubprocessViolationError
 from .freezer import freeze
 from .injector import prompt_inject
 from .signature_lock import lock_signature
@@ -10,6 +10,7 @@ from .semantic import prompt_assert
 from .config import init_config
 from .fs_sandbox import restrict_fs
 from .side_effects import no_side_effects
+from .subprocess_sandbox import restrict_subprocess
 
 # Auto-initialize configuration-based auto-decoration if shield.yaml is present in project root
 init_config()
@@ -24,6 +25,7 @@ __all__ = [
     "FilesystemViolationError",
     "SideEffectViolationError",
     "ComplexityViolationError",
+    "SubprocessViolationError",
     "freeze",
     "prompt_inject",
     "lock_signature",
@@ -35,4 +37,5 @@ __all__ = [
     "init_config",
     "restrict_fs",
     "no_side_effects",
+    "restrict_subprocess",
 ]

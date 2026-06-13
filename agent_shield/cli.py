@@ -71,14 +71,17 @@ def cmd_status(args):
     elif violation_type == "forbidden_import" or violation_type == "disallowed_import":
         imported = details.get("imported") or "<module>"
         print(f"  python -m agent_shield whitelist --import \"{imported}\"")
+    elif violation_type == "subprocess_violation":
+        forbidden = details.get("forbidden_command") or "<command>"
+        print(f"  python -m agent_shield whitelist --command \"{forbidden}\"")
     else:
         print("  Check your shield.yaml rules and add exceptions manually.")
     print("=" * 80)
     return 0
 
 def cmd_whitelist(args):
-    if not args.import_name and not args.path and not args.host:
-        print("Error: You must specify at least one of --import, --path, or --host to whitelist.")
+    if not args.import_name and not args.path and not args.host and not args.command_name:
+        print("Error: You must specify at least one of --import, --path, --host, or --command to whitelist.")
         return 1
 
     root = find_project_root()
@@ -124,6 +127,13 @@ def cmd_whitelist(args):
             hosts.append(args.host)
         matching_rule["restrict_network"] = hosts
         print(f"Whitelisted host '{args.host}' for pattern '{target_pattern}'.")
+
+    if args.command_name:
+        cmds = matching_rule.get("restrict_subprocess", [])
+        if args.command_name not in cmds:
+            cmds.append(args.command_name)
+        matching_rule["restrict_subprocess"] = cmds
+        print(f"Whitelisted subprocess command '{args.command_name}' for pattern '{target_pattern}'.")
 
     if args.path:
         # Default to both read and write if neither is specified
@@ -181,6 +191,7 @@ def main(argv=None):
     whitelist_parser.add_argument("--read", action="store_true", help="Allow read access to path")
     whitelist_parser.add_argument("--write", action="store_true", help="Allow write access to path")
     whitelist_parser.add_argument("--host", help="Whitelist network host/domain")
+    whitelist_parser.add_argument("--command", dest="command_name", help="Whitelist subprocess command")
     whitelist_parser.add_argument("--pattern", help="Rule pattern to update (defaults to '*')")
 
     args = parser.parse_args(argv)
