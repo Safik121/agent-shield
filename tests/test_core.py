@@ -153,5 +153,59 @@ def test_global_allowed_with_flag():
     assert func_allowed_global() == 100
 
 
+def test_detect_hardcoded_secrets():
+    from agent_shield.inspector import detect_hardcoded_secrets
+
+    def func_with_openai_key():
+        key = "sk-proj-1234567890abcdef1234567890abcdef123456"
+        return key
+
+    def func_with_aws_key():
+        aws_id = "AKIA1234567890ABCDEF"
+        return aws_id
+
+    def func_with_suspicious_var():
+        api_key = "my_super_secret_api_token"
+        return api_key
+
+    def func_with_bearer():
+        auth = "Bearer abcdef1234567890"
+        return auth
+
+    def func_clean():
+        placeholder_key = "TODO"
+        generic_string = "hello world"
+        return generic_string
+
+    assert "sk-proj-1234567890abcdef1234567890abcdef123456" in detect_hardcoded_secrets(func_with_openai_key)
+    assert "AKIA1234567890ABCDEF" in detect_hardcoded_secrets(func_with_aws_key)
+    assert "my_super_secret_api_token" in detect_hardcoded_secrets(func_with_suspicious_var)
+    assert "Bearer abcdef1234567890" in detect_hardcoded_secrets(func_with_bearer)
+    assert detect_hardcoded_secrets(func_clean) == []
+
+
+def test_detect_cpu_lockups():
+    from agent_shield.inspector import detect_cpu_lockups
+
+    def func_with_while_true_pass():
+        while True:
+            pass
+
+    def func_with_while_true_literal():
+        while 1:
+            "idle string"
+
+    def func_clean_while():
+        x = 0
+        while x < 10:
+            x += 1
+        return x
+
+    assert detect_cpu_lockups(func_with_while_true_pass) is True
+    assert detect_cpu_lockups(func_with_while_true_literal) is True
+    assert detect_cpu_lockups(func_clean_while) is False
+
+
+
 
 

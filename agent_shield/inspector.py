@@ -1,5 +1,6 @@
 import ast
 import inspect
+import re
 import textwrap
 import typing
 
@@ -98,5 +99,100 @@ def detect_global_keyword(func: typing.Callable) -> bool:
         if isinstance(node, ast.Global):
             return True
             
+    return False
+
+
+# Regex patterns for standalone key identification
+SECRET_PATTERNS = [
+    re.compile(r"sk-[a-zA-Z0-9\-]{32,70}"),  # OpenAI (sk-proj-... or sk-...)
+    re.compile(r"AKIA[0-9A-Z]{16}"),       # AWS Access Key ID
+    re.compile(r"bearer\s+[a-zA-Z0-9_\-\.]{15,}", re.IGNORECASE) # Bearer token
+]
+
+SUSPICIOUS_VAR_NAMES = {"api_key", "secret", "password", "token", "passwd", "access_key", "secret_key", "pwd", "key"}
+
+
+def detect_hardcoded_secrets(func: typing.Callable) -> list[str]:
+    """Analyzes the AST of a function to detect potentially hardcoded API keys or secrets.
+    
+    Args:
+        func: The function to analyze.
+        
+    Returns:
+        A list of detected secret strings.
+    """
+    try:
+        source = inspect.getsource(func)
+        dedented_source = textwrap.dedent(source)
+        tree = ast.parse(dedented_source)
+    except Exception:
+        return []
+
+    detected_secrets = set()
+
+    for node in ast.walk(tree):
+        # Check variable assignment values
+        if isinstance(node, ast.Assign):
+            is_suspicious_var = False
+            for target in node.targets:
+                if isinstance(target, ast.Name) and any(susp_name in target.id.lower() for susp_name in SUSPICIOUS_VAR_NAMES):
+                    is_suspicious_var = True
+                    break
+            if is_suspicious_var and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                val = node.value.value.strip()
+                placeholders = {"placeholder", "todo", "change_me", "my_key", "dummy", "test", "root", "secret", ""}
+                if len(val) > 6 and val.lower() not in placeholders:
+                    detected_secrets.add(node.value.value)
+                    
+        # Check all string constants against signature regexes
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            val = node.value
+            for pattern in SECRET_PATTERNS:
+                if pattern.search(val):
+                    detected_secrets.add(val)
+                    break
+
+    return sorted(list(detected_secrets))
+
+
+def detect_cpu_lockups(func: typing.Callable) -> bool:
+    """Analyzes the AST of a function to detect potential infinite loops causing CPU lockups.
+    
+    Args:
+        func: The function to analyze.
+        
+    Returns:
+        True if a dangerous CPU lockup pattern is found, False otherwise.
+    """
+    try:
+        source = inspect.getsource(func)
+        dedented_source = textwrap.dedent(source)
+        tree = ast.parse(dedented_source)
+    except Exception:
+        return False
+
+    def is_constant_truthy(test_node) -> bool:
+        if isinstance(test_node, ast.Constant):
+            return bool(test_node.value)
+        if isinstance(test_node, ast.Name) and test_node.id == "True":
+            return True
+        return False
+
+    def is_dangerous_body(body) -> bool:
+        if not body:
+            return True
+        for stmt in body:
+            if isinstance(stmt, ast.Pass):
+                continue
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+                continue
+            return False
+        return True
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.While):
+            if is_constant_truthy(node.test) and is_dangerous_body(node.body):
+                return True
+                
     return False
 
