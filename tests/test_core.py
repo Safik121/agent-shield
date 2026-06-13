@@ -1541,6 +1541,27 @@ def test_restrict_db_readonly():
     asyncio.run(async_db_ops())
 
 
+def test_virtual_fs_and_secrets_leak_compatibility():
+    import os
+    from agent_shield import virtual_fs, no_secrets_leak, SecretsLeakViolationError
+
+    dummy_real_path = os.path.abspath("virtual_leak_test.txt")
+
+    @no_secrets_leak(leak_types=["secrets"])
+    @virtual_fs(in_memory_write=True, allow_real_read=["*"])
+    def write_virtual_leak():
+        with open(dummy_real_path, "w") as f:
+            f.write("AKIAIOSFODNN7EXAMPLE")
+
+    try:
+        write_virtual_leak()
+        assert False, "Should have raised SecretsLeakViolationError"
+    except SecretsLeakViolationError:
+        pass
+        
+    assert os.path.exists(dummy_real_path) is False
+
+
 
 
 

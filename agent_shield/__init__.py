@@ -9,10 +9,10 @@ from .network_sandbox import restrict_network, limit_calls
 from .semantic import prompt_assert
 from .config import init_config
 from .fs_sandbox import restrict_fs
+from .virtual_fs import virtual_fs
 from .side_effects import no_side_effects
 from .subprocess_sandbox import restrict_subprocess
 from .secrets_sandbox import no_secrets_leak
-from .virtual_fs import virtual_fs
 from .prompt_guard import guard_prompt
 from .db_sandbox import restrict_db
 
