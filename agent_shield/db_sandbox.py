@@ -13,7 +13,12 @@ _orig_sqlite3_connect = sqlite3.connect
 _db_restricted_context = contextvars.ContextVar("db_restricted_context", default=None)
 
 
-def _is_write_query(sql: str) -> bool:
+def _is_write_query(sql) -> bool:
+    if isinstance(sql, bytes):
+        sql = sql.decode('utf-8', errors='ignore')
+    elif not isinstance(sql, str):
+        sql = str(sql)
+        
     sql_clean = sql.strip().upper()
     # Remove SQL line comments
     sql_clean = re.sub(r'--.*$', '', sql_clean, flags=re.MULTILINE)
@@ -68,25 +73,23 @@ class _WrappedSqliteCursor:
         self._orig_cursor = orig_cursor
         self._info = info
         
-    def execute(self, sql, parameters=None):
+    def execute(self, sql, *args, **kwargs):
         if self._info["read_only"]:
             if _is_write_query(sql):
                 _report_db_violation_and_raise(sql, self._info)
-        if parameters is not None:
-            return self._orig_cursor.execute(sql, parameters)
-        return self._orig_cursor.execute(sql)
+        return self._orig_cursor.execute(sql, *args, **kwargs)
         
-    def executemany(self, sql, seq_of_parameters):
+    def executemany(self, sql, *args, **kwargs):
         if self._info["read_only"]:
             if _is_write_query(sql):
                 _report_db_violation_and_raise(sql, self._info)
-        return self._orig_cursor.executemany(sql, seq_of_parameters)
+        return self._orig_cursor.executemany(sql, *args, **kwargs)
         
-    def executescript(self, sql_script):
+    def executescript(self, sql_script, *args, **kwargs):
         if self._info["read_only"]:
             if _is_write_query(sql_script):
                 _report_db_violation_and_raise(sql_script, self._info)
-        return self._orig_cursor.executescript(sql_script)
+        return self._orig_cursor.executescript(sql_script, *args, **kwargs)
         
     def __getattr__(self, name):
         return getattr(self._orig_cursor, name)
@@ -104,25 +107,23 @@ class _WrappedSqliteConnection:
         cursor = self._orig_conn.cursor(*args, **kwargs)
         return _WrappedSqliteCursor(cursor, self._info)
         
-    def execute(self, sql, parameters=None):
+    def execute(self, sql, *args, **kwargs):
         if self._info["read_only"]:
             if _is_write_query(sql):
                 _report_db_violation_and_raise(sql, self._info)
-        if parameters is not None:
-            return self._orig_conn.execute(sql, parameters)
-        return self._orig_conn.execute(sql)
+        return self._orig_conn.execute(sql, *args, **kwargs)
         
-    def executemany(self, sql, seq_of_parameters):
+    def executemany(self, sql, *args, **kwargs):
         if self._info["read_only"]:
             if _is_write_query(sql):
                 _report_db_violation_and_raise(sql, self._info)
-        return self._orig_conn.executemany(sql, seq_of_parameters)
+        return self._orig_conn.executemany(sql, *args, **kwargs)
         
-    def executescript(self, sql_script):
+    def executescript(self, sql_script, *args, **kwargs):
         if self._info["read_only"]:
             if _is_write_query(sql_script):
                 _report_db_violation_and_raise(sql_script, self._info)
-        return self._orig_conn.executescript(sql_script)
+        return self._orig_conn.executescript(sql_script, *args, **kwargs)
         
     def __getattr__(self, name):
         return getattr(self._orig_conn, name)

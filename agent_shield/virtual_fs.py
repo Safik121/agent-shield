@@ -62,15 +62,43 @@ class VirtualFile:
         }
         return len(data)
         
+    def readline(self, limit=-1):
+        line = self.buffer.readline(limit)
+        if not self.is_binary:
+            return line.decode('utf-8', errors='ignore')
+        return line
+
+    def readlines(self, hint=-1):
+        lines = self.buffer.readlines(hint)
+        if not self.is_binary:
+            return [line.decode('utf-8', errors='ignore') for line in lines]
+        return lines
+
+    def writelines(self, lines):
+        for line in lines:
+            self.write(line)
+
     def seek(self, offset, whence=io.SEEK_SET):
         return self.buffer.seek(offset, whence)
         
     def tell(self):
         return self.buffer.tell()
         
+    def flush(self):
+        self.buffer.flush()
+
     def close(self):
         self.buffer.close()
         
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
     def __enter__(self):
         return self
         
@@ -121,6 +149,8 @@ def _virtual_isfile(path, state):
 
 # Custom hooks
 def _custom_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+    if isinstance(file, int):
+        return _orig_open(file, mode=mode, buffering=buffering, encoding=encoding, errors=errors, newline=newline, closefd=closefd, opener=opener)
     vfs = _vfs_state.get()
     if vfs is not None:
         path = os.path.abspath(str(file))

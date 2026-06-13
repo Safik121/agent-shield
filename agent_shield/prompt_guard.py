@@ -18,23 +18,32 @@ DEFAULT_INJECTION_SIGNATURES = [
 ]
 
 
-def _scan_value(val, rules):
+def _scan_value(val, rules, seen=None):
+    if seen is None:
+        seen = set()
+        
+    val_id = id(val)
+    if val_id in seen:
+        return None
+        
     if isinstance(val, str):
         val_lower = val.lower()
         for rule in rules:
             if rule.lower() in val_lower:
                 return rule
     elif isinstance(val, (list, tuple, set)):
+        seen.add(val_id)
         for item in val:
-            res = _scan_value(item, rules)
+            res = _scan_value(item, rules, seen)
             if res:
                 return res
     elif isinstance(val, dict):
+        seen.add(val_id)
         for k, v in val.items():
-            res = _scan_value(k, rules)
+            res = _scan_value(k, rules, seen)
             if res:
                 return res
-            res = _scan_value(v, rules)
+            res = _scan_value(v, rules, seen)
             if res:
                 return res
     return None
