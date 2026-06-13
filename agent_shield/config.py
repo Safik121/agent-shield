@@ -135,6 +135,10 @@ def _apply_rules_to_module(module, module_name, rules):
                         from agent_shield.network_sandbox import limit_calls
                         max_calls = int(rule["limit_calls"])
                         decorated = limit_calls(max_calls)(decorated)
+                        
+                    if "restrict_env" in rule and rule["restrict_env"]:
+                        from agent_shield.contracts import restrict_env
+                        decorated = restrict_env(allow_mutation=False)(decorated)
                 try:
                     setattr(module, attr_name, decorated)
                 except Exception:

@@ -1,10 +1,10 @@
 import functools
-import threading
 import os
 import sys
 import inspect
 import json
 import builtins
+import contextvars
 from agent_shield.contracts import FilesystemViolationError
 
 # Store original filesystem functions
@@ -17,10 +17,9 @@ _orig_mkdir = os.mkdir
 _orig_makedirs = os.makedirs
 _orig_rmdir = os.rmdir
 
-# Active thread restriction registry: thread_id -> (allow_read, allow_write, func, project_root)
-_fs_restricted_threads = {}
-_lock = threading.Lock()
-_local_state = threading.local()
+# Active thread/task restriction context: (allow_read, allow_write, func, project_root)
+_fs_restricted_context = contextvars.ContextVar("fs_restricted_context", default=None)
+_local_state = contextvars.ContextVar("local_state", default=False)
 
 def _is_python_system_path(path: str) -> bool:
     """Checks if a path belongs to standard Python runtime, site-packages, or interpreter libraries."""
@@ -59,108 +58,131 @@ def _is_path_allowed(path: str, allowed_list: list[str]) -> bool:
             return True
     return False
 
-def _handle_fs_violation(path: str, operation: str, allowed_list: list[str], func, project_root: str):
+def _report_violation_and_raise(violated_path: str, operation: str, allowed_list: list[str], func, project_root: str):
     reports_dir = os.path.join(project_root, "shield_reports")
-    os.makedirs(reports_dir, exist_ok=True)
     
+    # Enable re-entrancy tracker to prevent recursion when making directories or writing report
+    _local_state.set(True)
     try:
-        func_file = inspect.getfile(func)
-        func_abs_file = os.path.abspath(func_file)
-    except Exception:
-        func_abs_file = "unknown"
+        _orig_makedirs(reports_dir, exist_ok=True)
         
-    report = {
-        "violation_type": "filesystem_violation",
-        "function_name": func.__name__,
-        "file_path": func_abs_file,
-        "details": {
-            "attempted_path": path,
-            "operation": operation,
-            "allowed_paths": allowed_list
-        },
-        "instruction": (
-            f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
-            f"attempted an unauthorized '{operation}' operation on '{path}'.\n"
-            f"Allowed paths: {', '.join(allowed_list)}.\n"
-            f"Please remove this file operation or write to an allowed path."
-        )
-    }
-    report_path = os.path.join(reports_dir, "violation_report.json")
-    with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
+        try:
+            func_file = inspect.getfile(func)
+            func_abs_file = os.path.abspath(func_file)
+        except Exception:
+            func_abs_file = "unknown"
+            
+        report = {
+            "violation_type": "filesystem_violation",
+            "function_name": func.__name__,
+            "file_path": func_abs_file,
+            "details": {
+                "requested_path": violated_path,
+                "operation": operation,
+                "allowed_paths": allowed_list
+            },
+            "instruction": (
+                f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                f"attempted an unauthorized '{operation}' operation on '{violated_path}'. "
+                f"Allowed paths: {allowed_list}. "
+                f"Please update the code to access only authorized paths, or add exceptions in shield.yaml."
+            )
+        }
         
-    error_msg = f"Function '{func.__name__}' attempted unauthorized '{operation}' to path '{path}'."
-    
+        report_path = os.path.join(reports_dir, "violation_report.json")
+        with _orig_open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+    finally:
+        _local_state.set(False)
+        
     is_passive = os.environ.get("AGENT_SHIELD_PASSIVE", "").lower() in ("true", "1")
     if is_passive:
-        print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
+        print(f"Warning: agent-shield passive mode violation detected: Filesystem operation '{operation}' on '{violated_path}' is forbidden.")
     else:
-        raise FilesystemViolationError(error_msg)
+        raise FilesystemViolationError(
+            f"Function '{func.__name__ if func else 'unknown'}' attempted unauthorized '{operation}' to path '{violated_path}'."
+        )
 
-def _check_fs_access(path: str, operation_type: str):
-    thread_id = threading.get_ident()
-    with _lock:
-        restricted = _fs_restricted_threads.get(thread_id)
+# Custom hook wrappers for standard library functions
+def _custom_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        allow_read, allow_write, func, project_root = restricted
+        path = str(file)
         
-    if restricted:
-        if getattr(_local_state, "in_check", False):
-            return
-            
-        _local_state.in_check = True
-        try:
-            allow_read, allow_write, func, project_root = restricted
-            abs_path = os.path.abspath(os.path.expanduser(str(path)))
-            if operation_type == "write":
-                if allow_write is not None and not _is_path_allowed(abs_path, allow_write):
-                    _handle_fs_violation(abs_path, "write", allow_write, func, project_root)
-            else:
-                if allow_read is not None and not _is_path_allowed(abs_path, allow_read):
-                    _handle_fs_violation(abs_path, "read", allow_read, func, project_root)
-        finally:
-            _local_state.in_check = False
+        # Check if the operation is a write operation
+        is_write = any(char in mode for char in ('w', 'a', 'x', '+'))
+        
+        if is_write:
+            if not _is_path_allowed(path, allow_write):
+                _report_violation_and_raise(path, "write", allow_write, func, project_root)
+        else:
+            if not _is_path_allowed(path, allow_read):
+                _report_violation_and_raise(path, "read", allow_read, func, project_root)
+                
+    return _orig_open(file, mode=mode, buffering=buffering, encoding=encoding, errors=errors, newline=newline, closefd=closefd, opener=opener)
 
-# Custom wrappers
-def _custom_open(file, mode='r', *args, **kwargs):
-    # If the file argument is a path (str, bytes or Path object)
-    if isinstance(file, (str, bytes, os.PathLike)):
-        # Determine operation type
-        mode_str = str(mode)
-        is_writing = any(char in mode_str for char in ('w', 'a', '+', 'x'))
-        _check_fs_access(file, "write" if is_writing else "read")
-    return _orig_open(file, mode, *args, **kwargs)
+def _custom_remove(path, *, dir_fd=None):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        _, allow_write, func, project_root = restricted
+        if not _is_path_allowed(str(path), allow_write):
+            _report_violation_and_raise(str(path), "remove", allow_write, func, project_root)
+    return _orig_remove(path, dir_fd=dir_fd)
 
-def _custom_remove(path, *args, **kwargs):
-    _check_fs_access(path, "write")
-    return _orig_remove(path, *args, **kwargs)
+def _custom_unlink(path, *, dir_fd=None):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        _, allow_write, func, project_root = restricted
+        if not _is_path_allowed(str(path), allow_write):
+            _report_violation_and_raise(str(path), "unlink", allow_write, func, project_root)
+    return _orig_unlink(path, dir_fd=dir_fd)
 
-def _custom_unlink(path, *args, **kwargs):
-    _check_fs_access(path, "write")
-    if _orig_unlink:
-        return _orig_unlink(path, *args, **kwargs)
+def _custom_rename(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        _, allow_write, func, project_root = restricted
+        if not _is_path_allowed(str(src), allow_write):
+            _report_violation_and_raise(str(src), "rename_src", allow_write, func, project_root)
+        if not _is_path_allowed(str(dst), allow_write):
+            _report_violation_and_raise(str(dst), "rename_dst", allow_write, func, project_root)
+    return _orig_rename(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
-def _custom_rename(src, dst, *args, **kwargs):
-    _check_fs_access(src, "write")
-    _check_fs_access(dst, "write")
-    return _orig_rename(src, dst, *args, **kwargs)
+def _custom_replace(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        _, allow_write, func, project_root = restricted
+        if not _is_path_allowed(str(src), allow_write):
+            _report_violation_and_raise(str(src), "replace_src", allow_write, func, project_root)
+        if not _is_path_allowed(str(dst), allow_write):
+            _report_violation_and_raise(str(dst), "replace_dst", allow_write, func, project_root)
+    return _orig_replace(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
-def _custom_replace(src, dst, *args, **kwargs):
-    _check_fs_access(src, "write")
-    _check_fs_access(dst, "write")
-    return _orig_replace(src, dst, *args, **kwargs)
+def _custom_mkdir(path, mode=0o777, *, dir_fd=None):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        _, allow_write, func, project_root = restricted
+        if not _is_path_allowed(str(path), allow_write):
+            _report_violation_and_raise(str(path), "mkdir", allow_write, func, project_root)
+    return _orig_mkdir(path, mode=mode, dir_fd=dir_fd)
 
-def _custom_mkdir(path, *args, **kwargs):
-    _check_fs_access(path, "write")
-    return _orig_mkdir(path, *args, **kwargs)
+def _custom_makedirs(name, mode=0o777, exist_ok=False):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        _, allow_write, func, project_root = restricted
+        if not _is_path_allowed(str(name), allow_write):
+            _report_violation_and_raise(str(name), "makedirs", allow_write, func, project_root)
+    return _orig_makedirs(name, mode=mode, exist_ok=exist_ok)
 
-def _custom_makedirs(name, *args, **kwargs):
-    _check_fs_access(name, "write")
-    return _orig_makedirs(name, *args, **kwargs)
+def _custom_rmdir(path, *, dir_fd=None):
+    restricted = _fs_restricted_context.get()
+    if restricted and not _local_state.get():
+        _, allow_write, func, project_root = restricted
+        if not _is_path_allowed(str(path), allow_write):
+            _report_violation_and_raise(str(path), "rmdir", allow_write, func, project_root)
+    return _orig_rmdir(path, dir_fd=dir_fd)
 
-def _custom_rmdir(path, *args, **kwargs):
-    _check_fs_access(path, "write")
-    return _orig_rmdir(path, *args, **kwargs)
-
-# Apply global monkeypatches
+# Apply global monkeypatches on import
 builtins.open = _custom_open
 os.remove = _custom_remove
 if _orig_unlink:
@@ -172,25 +194,58 @@ os.makedirs = _custom_makedirs
 os.rmdir = _custom_rmdir
 
 def restrict_fs(allow_read: list[str] = None, allow_write: list[str] = None):
-    """Decorator to restrict filesystem access of a function.
+    """Decorator to restrict filesystem access within the decorated function.
     
-    If the function attempts filesystem operations outside allowed directories,
-    it raises a FilesystemViolationError.
+    Supported parameters:
+    - allow_read: A list of allowed directory or file paths for reading.
+    - allow_write: A list of allowed directory or file paths for writing/modifying.
     """
+    if allow_read is None:
+        allow_read = []
+    if allow_write is None:
+        allow_write = []
+        
     def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)
-            thread_id = threading.get_ident()
-            
-            with _lock:
-                _fs_restricted_threads[thread_id] = (allow_read, allow_write, func, project_root)
+        if inspect.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
                 
-            try:
-                return func(*args, **kwargs)
-            finally:
-                with _lock:
-                    _fs_restricted_threads.pop(thread_id, None)
-        return wrapper
+                existing = _fs_restricted_context.get()
+                if existing:
+                    parent_read, parent_write = existing[0], existing[1]
+                    new_read = list(set(allow_read).intersection(set(parent_read))) if allow_read is not None else parent_read
+                    new_write = list(set(allow_write).intersection(set(parent_write))) if allow_write is not None else parent_write
+                else:
+                    new_read = allow_read
+                    new_write = allow_write
+                    
+                token = _fs_restricted_context.set((new_read, new_write, func, project_root))
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    _fs_restricted_context.reset(token)
+            return wrapper
+        else:
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
+                
+                existing = _fs_restricted_context.get()
+                if existing:
+                    parent_read, parent_write = existing[0], existing[1]
+                    new_read = list(set(allow_read).intersection(set(parent_read))) if allow_read is not None else parent_read
+                    new_write = list(set(allow_write).intersection(set(parent_write))) if allow_write is not None else parent_write
+                else:
+                    new_read = allow_read
+                    new_write = allow_write
+                    
+                token = _fs_restricted_context.set((new_read, new_write, func, project_root))
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    _fs_restricted_context.reset(token)
+            return wrapper
     return decorator

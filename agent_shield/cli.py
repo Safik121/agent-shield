@@ -79,6 +79,9 @@ def cmd_status(args):
     elif violation_type == "secrets_leak_violation":
         leak_type = details.get("leak_type") or "secret/PII"
         print(f"  - Remove the leaked '{leak_type}' from the output/file/request, or check decorator options.")
+    elif violation_type == "environment_violation":
+        key = details.get("key") or "<key>"
+        print(f"  - Remove modification of environment variable '{key}' or check decorator options.")
     else:
         print("  Check your shield.yaml rules and add exceptions manually.")
     print("=" * 80)

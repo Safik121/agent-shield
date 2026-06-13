@@ -1,4 +1,4 @@
-from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError, PromptAssertionError, FilesystemViolationError, SideEffectViolationError, ComplexityViolationError, SubprocessViolationError, SecretsLeakViolationError, CallLimitViolationError
+from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError, PromptAssertionError, FilesystemViolationError, SideEffectViolationError, ComplexityViolationError, SubprocessViolationError, SecretsLeakViolationError, CallLimitViolationError, EnvironmentViolationError, restrict_env
 from .freezer import freeze
 from .injector import prompt_inject
 from .signature_lock import lock_signature
@@ -29,6 +29,7 @@ __all__ = [
     "SubprocessViolationError",
     "SecretsLeakViolationError",
     "CallLimitViolationError",
+    "EnvironmentViolationError",
     "freeze",
     "prompt_inject",
     "lock_signature",
@@ -43,4 +44,5 @@ __all__ = [
     "no_side_effects",
     "restrict_subprocess",
     "no_secrets_leak",
+    "restrict_env",
 ]

@@ -1281,6 +1281,157 @@ def test_no_secrets_leak_large_payload_truncated(tmp_path):
         write_large_data(include_secret=True)
 
 
+def test_restrict_env_prevents_mutation():
+    """Verifies that @restrict_env prevents mutating or deleting os.environ keys."""
+    from agent_shield import restrict_env, EnvironmentViolationError
+    
+    @restrict_env()
+    def mutate_env():
+        os.environ["SHIELD_TEST_VAR"] = "mutated"
+        
+    @restrict_env()
+    def delete_env():
+        del os.environ["PATH"]
+        
+    with pytest.raises(EnvironmentViolationError) as exc_info:
+        mutate_env()
+    assert "mutation of environment variable" in str(exc_info.value)
+    
+    with pytest.raises(EnvironmentViolationError) as exc_info:
+        delete_env()
+    assert "deletion of environment variable" in str(exc_info.value)
+
+
+def test_asyncio_sandbox_compatibility():
+    """Verifies that sandboxes function correctly and remain isolated across asyncio tasks."""
+    import asyncio
+    from agent_shield import restrict_network, NetworkViolationError
+    import socket
+    
+    task_a_failed = False
+    task_b_succeeded = False
+    
+    @restrict_network(allowed_hosts=["127.0.0.1"])
+    async def task_a():
+        nonlocal task_a_failed
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.connect(("127.0.0.1", 9999))
+        except Exception:
+            pass
+            
+        s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s2.connect(("google.com", 80))
+        except NetworkViolationError:
+            task_a_failed = True
+            
+    async def task_b():
+        nonlocal task_b_succeeded
+        await asyncio.sleep(0.01)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.connect(("google.com", 80))
+            task_b_succeeded = True
+        except NetworkViolationError:
+            pass
+        except Exception:
+            task_b_succeeded = True
+            
+    async def main_async():
+        await asyncio.gather(task_a(), task_b())
+        
+    asyncio.run(main_async())
+    
+    assert task_a_failed is True
+    assert task_b_succeeded is True
+
+
+def test_asyncio_all_sandboxes_compatibility():
+    """Verifies that other sandboxes also support async/coroutine functions and remain isolated."""
+    import asyncio
+    import os
+    from agent_shield import (
+        restrict_fs, FilesystemViolationError,
+        restrict_env, EnvironmentViolationError,
+        restrict_subprocess, SubprocessViolationError,
+        no_secrets_leak, SecretsLeakViolationError,
+        shield, ShieldViolationError
+    )
+
+    fs_failed = False
+    env_failed = False
+    sub_failed = False
+    leak_failed = False
+    shield_failed = False
+
+    @restrict_fs(allow_read=["."], allow_write=[])
+    async def task_fs():
+        nonlocal fs_failed
+        try:
+            with open("test_dummy_write.txt", "w") as f:
+                f.write("test")
+        except FilesystemViolationError:
+            fs_failed = True
+
+    @restrict_env(allow_mutation=False)
+    async def task_env():
+        nonlocal env_failed
+        try:
+            os.environ["TEST_ENV_VAR_ASYNC"] = "violation"
+        except EnvironmentViolationError:
+            env_failed = True
+
+    @restrict_subprocess(allow_commands=[])
+    async def task_subprocess():
+        nonlocal sub_failed
+        try:
+            import subprocess
+            subprocess.Popen(["ls"])
+        except SubprocessViolationError:
+            sub_failed = True
+
+    @no_secrets_leak(leak_types=["secrets"])
+    async def task_leak():
+        nonlocal leak_failed
+        try:
+            # Writing an AWS access key should trigger leak protection
+            with open("test_dummy_leak.txt", "w") as f:
+                f.write("AKIAIOSFODNN7EXAMPLE")
+        except SecretsLeakViolationError:
+            leak_failed = True
+
+    @shield()
+    async def task_shield() -> int:
+        return "not an int"
+
+    async def run_shield():
+        nonlocal shield_failed
+        try:
+            await task_shield()
+        except ShieldViolationError:
+            shield_failed = True
+
+    async def main_async():
+        await asyncio.gather(
+            task_fs(),
+            task_env(),
+            task_subprocess(),
+            task_leak(),
+            run_shield()
+        )
+
+    asyncio.run(main_async())
+
+    assert fs_failed is True
+    assert env_failed is True
+    assert sub_failed is True
+    assert leak_failed is True
+    assert shield_failed is True
+
+
+
+
 
 
 

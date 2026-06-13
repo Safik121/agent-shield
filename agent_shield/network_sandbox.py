@@ -1,20 +1,19 @@
 import functools
-import threading
 import socket
 import os
 import inspect
 import json
+import contextvars
 from agent_shield.contracts import NetworkViolationError, CallLimitViolationError
 
 # Store original socket methods
 _orig_connect = socket.socket.connect
 _orig_connect_ex = socket.socket.connect_ex
 
-# Active thread restriction registry: thread_id -> (allowed_hosts, func, project_root)
-_restricted_threads = {}
-# Active call limit registry: thread_id -> {"max_calls": int, "current_calls": int, "domains": list, "func": func, "project_root": str}
-_call_limit_threads = {}
-_lock = threading.Lock()
+# Active thread/task restriction context
+_restricted_context = contextvars.ContextVar("restricted_context", default=None)
+# Active thread/task call limit context
+_call_limit_context = contextvars.ContextVar("call_limit_context", default=None)
 
 def _is_host_allowed(target_host: str, allowed_hosts: list[str]) -> bool:
     target_host = target_host.lower().strip()
@@ -54,9 +53,8 @@ def _is_host_allowed(target_host: str, allowed_hosts: list[str]) -> bool:
         
     return False
 
-def _check_call_limit(thread_id, address):
-    with _lock:
-        limit_info = _call_limit_threads.get(thread_id)
+def _check_call_limit(address):
+    limit_info = _call_limit_context.get()
     if not limit_info:
         return
 
@@ -68,9 +66,8 @@ def _check_call_limit(thread_id, address):
     if isinstance(address, tuple) and len(address) > 0:
         host = address[0]
         if _is_host_allowed(host, domains):
-            with _lock:
-                limit_info["current_calls"] += 1
-                current = limit_info["current_calls"]
+            limit_info["current_calls"] += 1
+            current = limit_info["current_calls"]
             if current > max_calls:
                 reports_dir = os.path.join(project_root, "shield_reports")
                 os.makedirs(reports_dir, exist_ok=True)
@@ -102,12 +99,8 @@ def _check_call_limit(thread_id, address):
                 )
 
 def _custom_connect(self, address):
-    thread_id = threading.get_ident()
-    _check_call_limit(thread_id, address)
-    
-    with _lock:
-        restricted = _restricted_threads.get(thread_id)
-        
+    _check_call_limit(address)
+    restricted = _restricted_context.get()
     if restricted:
         allowed_hosts, func, project_root = restricted
         if isinstance(address, tuple) and len(address) > 0:
@@ -149,12 +142,8 @@ def _custom_connect(self, address):
     return _orig_connect(self, address)
 
 def _custom_connect_ex(self, address):
-    thread_id = threading.get_ident()
-    _check_call_limit(thread_id, address)
-    
-    with _lock:
-        restricted = _restricted_threads.get(thread_id)
-        
+    _check_call_limit(address)
+    restricted = _restricted_context.get()
     if restricted:
         allowed_hosts, func, project_root = restricted
         if isinstance(address, tuple) and len(address) > 0:
@@ -206,21 +195,44 @@ def restrict_network(allowed_hosts: list[str]):
     it raises a NetworkViolationError.
     """
     def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)
-            thread_id = threading.get_ident()
-            
-            with _lock:
-                _restricted_threads[thread_id] = (allowed_hosts, func, project_root)
+        if inspect.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
                 
-            try:
-                return func(*args, **kwargs)
-            finally:
-                with _lock:
-                    _restricted_threads.pop(thread_id, None)
-        return wrapper
+                existing = _restricted_context.get()
+                if existing:
+                    parent_hosts = existing[0]
+                    new_hosts = list(set(allowed_hosts).intersection(set(parent_hosts)))
+                else:
+                    new_hosts = allowed_hosts
+                    
+                token = _restricted_context.set((new_hosts, func, project_root))
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    _restricted_context.reset(token)
+            return wrapper
+        else:
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
+                
+                existing = _restricted_context.get()
+                if existing:
+                    parent_hosts = existing[0]
+                    new_hosts = list(set(allowed_hosts).intersection(set(parent_hosts)))
+                else:
+                    new_hosts = allowed_hosts
+                    
+                token = _restricted_context.set((new_hosts, func, project_root))
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    _restricted_context.reset(token)
+            return wrapper
     return decorator
 
 def limit_calls(max_calls: int = 10, domains: list[str] = None):
@@ -233,29 +245,40 @@ def limit_calls(max_calls: int = 10, domains: list[str] = None):
         domains = ["*"]
         
     def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)
-            thread_id = threading.get_ident()
-            
-            with _lock:
-                existing = _call_limit_threads.get(thread_id)
-                _call_limit_threads[thread_id] = {
+        if inspect.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
+                
+                token = _call_limit_context.set({
                     "max_calls": max_calls,
                     "current_calls": 0,
                     "domains": domains,
                     "func": func,
                     "project_root": project_root
-                }
+                })
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    _call_limit_context.reset(token)
+            return wrapper
+        else:
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
                 
-            try:
-                return func(*args, **kwargs)
-            finally:
-                with _lock:
-                    if existing:
-                        _call_limit_threads[thread_id] = existing
-                    else:
-                        _call_limit_threads.pop(thread_id, None)
-        return wrapper
+                token = _call_limit_context.set({
+                    "max_calls": max_calls,
+                    "current_calls": 0,
+                    "domains": domains,
+                    "func": func,
+                    "project_root": project_root
+                })
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    _call_limit_context.reset(token)
+            return wrapper
     return decorator

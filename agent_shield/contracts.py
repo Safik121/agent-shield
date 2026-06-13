@@ -3,6 +3,7 @@ import json
 import inspect
 import functools
 import typing
+import contextvars
 
 class ShieldViolationError(Exception):
     """Exception raised when an architectural contract or boundary is violated."""
@@ -56,6 +57,11 @@ class SecretsLeakViolationError(ShieldViolationError):
 
 class CallLimitViolationError(ShieldViolationError):
     """Exception raised when function exceeds allowed number of network calls."""
+    pass
+
+
+class EnvironmentViolationError(ShieldViolationError):
+    """Exception raised when function attempts to mutate system environment variables."""
     pass
 
 
@@ -261,55 +267,228 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imp
                 exc_class=ComplexityViolationError
             )
 
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        result = func(*args, **kwargs)
-        
-        # Resolve return type hint, falling back if resolve fails (e.g. forward references)
-        try:
-            hints = typing.get_type_hints(func)
-            expected_type = hints.get("return", inspect.Signature.empty)
-        except Exception:
+    if inspect.iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            result = await func(*args, **kwargs)
+            
+            # Resolve return type hint, falling back if resolve fails (e.g. forward references)
             try:
-                sig = inspect.signature(func)
-                expected_type = sig.return_annotation
+                hints = typing.get_type_hints(func)
+                expected_type = hints.get("return", inspect.Signature.empty)
             except Exception:
-                expected_type = inspect.Signature.empty
+                try:
+                    sig = inspect.signature(func)
+                    expected_type = sig.return_annotation
+                except Exception:
+                    expected_type = inspect.Signature.empty
+                    
+            if not _is_matching_type(result, expected_type):
+                expected_name = _get_type_name(expected_type)
+                actual_name = _get_type_name(type(result))
                 
-        if not _is_matching_type(result, expected_type):
-            expected_name = _get_type_name(expected_type)
-            actual_name = _get_type_name(type(result))
-            
-            # Ensure report directory exists
-            os.makedirs(reports_dir, exist_ok=True)
-            
-            report = {
-                "violation_type": "return_type_mismatch",
-                "function_name": func.__name__,
-                "file_path": func_abs_file,
-                "expected_type": expected_name,
-                "actual_type": actual_name,
-                "instruction": (
-                    f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
-                    f"is annotated to return '{expected_name}', but it returned a value of type '{actual_name}'. "
-                    f"Please correct the function implementation to return the expected type, or update the "
-                    f"return type annotation if the signature needs to be changed."
+                # Ensure report directory exists
+                os.makedirs(reports_dir, exist_ok=True)
+                
+                report = {
+                    "violation_type": "return_type_mismatch",
+                    "function_name": func.__name__,
+                    "file_path": func_abs_file,
+                    "expected_type": expected_name,
+                    "actual_type": actual_name,
+                    "instruction": (
+                        f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                        f"is annotated to return '{expected_name}', but it returned a value of type '{actual_name}'. "
+                        f"Please correct the function implementation to return the expected type, or update the "
+                        f"return type annotation if the signature needs to be changed."
+                    )
+                }
+                
+                report_path = os.path.join(reports_dir, "violation_report.json")
+                with open(report_path, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
+                    
+                error_msg = (
+                    f"Function '{func.__name__}' returned type '{actual_name}' "
+                    f"instead of expected '{expected_name}'."
                 )
-            }
-            
-            report_path = os.path.join(reports_dir, "violation_report.json")
-            with open(report_path, "w", encoding="utf-8") as f:
-                json.dump(report, f, indent=2, ensure_ascii=False)
+                is_passive = os.environ.get("AGENT_SHIELD_PASSIVE", "").lower() in ("true", "1")
+                if is_passive:
+                    print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
+                else:
+                    raise ShieldViolationError(error_msg)
                 
-            error_msg = (
-                f"Function '{func.__name__}' returned type '{actual_name}' "
-                f"instead of expected '{expected_name}'."
-            )
-            is_passive = os.environ.get("AGENT_SHIELD_PASSIVE", "").lower() in ("true", "1")
-            if is_passive:
-                print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
-            else:
-                raise ShieldViolationError(error_msg)
+            return result
+        return wrapper
+    else:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            result = func(*args, **kwargs)
             
-        return result
-    return wrapper
+            # Resolve return type hint, falling back if resolve fails (e.g. forward references)
+            try:
+                hints = typing.get_type_hints(func)
+                expected_type = hints.get("return", inspect.Signature.empty)
+            except Exception:
+                try:
+                    sig = inspect.signature(func)
+                    expected_type = sig.return_annotation
+                except Exception:
+                    expected_type = inspect.Signature.empty
+                    
+            if not _is_matching_type(result, expected_type):
+                expected_name = _get_type_name(expected_type)
+                actual_name = _get_type_name(type(result))
+                
+                # Ensure report directory exists
+                os.makedirs(reports_dir, exist_ok=True)
+                
+                report = {
+                    "violation_type": "return_type_mismatch",
+                    "function_name": func.__name__,
+                    "file_path": func_abs_file,
+                    "expected_type": expected_name,
+                    "actual_type": actual_name,
+                    "instruction": (
+                        f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                        f"is annotated to return '{expected_name}', but it returned a value of type '{actual_name}'. "
+                        f"Please correct the function implementation to return the expected type, or update the "
+                        f"return type annotation if the signature needs to be changed."
+                    )
+                }
+                
+                report_path = os.path.join(reports_dir, "violation_report.json")
+                with open(report_path, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
+                    
+                error_msg = (
+                    f"Function '{func.__name__}' returned type '{actual_name}' "
+                    f"instead of expected '{expected_name}'."
+                )
+                is_passive = os.environ.get("AGENT_SHIELD_PASSIVE", "").lower() in ("true", "1")
+                if is_passive:
+                    print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
+                else:
+                    raise ShieldViolationError(error_msg)
+                
+            return result
+        return wrapper
+
+
+# Active environment restriction context
+_env_restricted_context = contextvars.ContextVar("env_restricted_context", default=None)
+
+# Monkeypatch os._Environ methods
+_orig_environ_setitem = os._Environ.__setitem__
+_orig_environ_delitem = os._Environ.__delitem__
+
+def _custom_environ_setitem(self, key, value):
+    info = _env_restricted_context.get()
+    if info:
+        func = info["func"]
+        project_root = info["project_root"]
+        reports_dir = os.path.join(project_root, "shield_reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        try:
+            func_file = inspect.getfile(func)
+            func_abs_file = os.path.abspath(func_file)
+        except Exception:
+            func_abs_file = "unknown"
+        
+        report = {
+            "violation_type": "environment_violation",
+            "function_name": func.__name__,
+            "file_path": func_abs_file,
+            "details": {
+                "operation": "setitem",
+                "key": str(key)
+            },
+            "instruction": f"Do not mutate environment variable '{key}' in restricted environment."
+        }
+        report_path = os.path.join(reports_dir, "violation_report.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+            
+        raise EnvironmentViolationError(f"Environment Sandbox: mutation of environment variable '{key}' is forbidden.")
+        
+    return _orig_environ_setitem(self, key, value)
+
+def _custom_environ_delitem(self, key):
+    info = _env_restricted_context.get()
+    if info:
+        func = info["func"]
+        project_root = info["project_root"]
+        reports_dir = os.path.join(project_root, "shield_reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        try:
+            func_file = inspect.getfile(func)
+            func_abs_file = os.path.abspath(func_file)
+        except Exception:
+            func_abs_file = "unknown"
+            
+        report = {
+            "violation_type": "environment_violation",
+            "function_name": func.__name__,
+            "file_path": func_abs_file,
+            "details": {
+                "operation": "delitem",
+                "key": str(key)
+            },
+            "instruction": f"Do not delete environment variable '{key}' in restricted environment."
+        }
+        report_path = os.path.join(reports_dir, "violation_report.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+            
+        raise EnvironmentViolationError(f"Environment Sandbox: deletion of environment variable '{key}' is forbidden.")
+        
+    return _orig_environ_delitem(self, key)
+
+# Apply global environ monkeypatch
+os._Environ.__setitem__ = _custom_environ_setitem
+os._Environ.__delitem__ = _custom_environ_delitem
+
+def restrict_env(allow_mutation: bool = False):
+    """Decorator to prevent modifications to environment variables (os.environ) during execution."""
+    def decorator(func):
+        if inspect.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
+                
+                if not allow_mutation:
+                    token = _env_restricted_context.set({
+                        "func": func,
+                        "project_root": project_root
+                    })
+                else:
+                    token = None
+                    
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    if token is not None:
+                        _env_restricted_context.reset(token)
+            return wrapper
+        else:
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(current_dir)
+                
+                if not allow_mutation:
+                    token = _env_restricted_context.set({
+                        "func": func,
+                        "project_root": project_root
+                    })
+                else:
+                    token = None
+                    
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    if token is not None:
+                        _env_restricted_context.reset(token)
+            return wrapper
+    return decorator
