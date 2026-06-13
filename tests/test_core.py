@@ -341,18 +341,18 @@ def test_package_exports():
     assert agent_shield.prompt_inject is not None
 
 
-def test_prompt_inject():
+def test_prompt_inject_modifies_docstring():
     """Verifies that @prompt_inject correctly injects AI architect constraints into docstrings."""
     from agent_shield.injector import prompt_inject
 
-    @prompt_inject("Do not modify the database connection logic.")
+    @prompt_inject("Test instruction")
     def my_db_function():
         """This function connects to the db."""
         return "connected"
 
     expected_block = (
         "=== AI ASSISTANT ARCHITECTURAL CONSTRAINT ===\n"
-        "Do not modify the database connection logic.\n"
+        "Test instruction\n"
         "============================================="
     )
     
@@ -363,18 +363,12 @@ def test_prompt_inject():
     assert my_db_function.__name__ == "my_db_function"
 
     # Test function without initial docstring
-    @prompt_inject("Strict rule.")
+    @prompt_inject("Another instruction")
     def empty_doc_function():
         pass
 
     assert empty_doc_function.__doc__ is not None
-    assert "Strict rule." in empty_doc_function.__doc__
-
-
-
-
-
-
+    assert "Another instruction" in empty_doc_function.__doc__
 
 
 
