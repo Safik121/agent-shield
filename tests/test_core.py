@@ -328,19 +328,21 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, and lock_signature."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, and mock_only."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
     assert hasattr(agent_shield, "freeze")
     assert hasattr(agent_shield, "prompt_inject")
     assert hasattr(agent_shield, "lock_signature")
+    assert hasattr(agent_shield, "mock_only")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
     assert agent_shield.freeze is not None
     assert agent_shield.prompt_inject is not None
     assert agent_shield.lock_signature is not None
+    assert agent_shield.mock_only is not None
 
 
 def test_prompt_inject_modifies_docstring():
@@ -422,6 +424,43 @@ def test_lock_signature_tamper_detection():
     data.pop("my_locked_function", None)
     with open(lockfile_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+def test_mock_only_raises_error_in_test_env():
+    """Verifies that @mock_only raises ShieldViolationError when run directly in a test environment."""
+    from agent_shield.sandbox import mock_only
+
+    @mock_only
+    def send_production_email():
+        return "sent"
+
+    with pytest.raises(ShieldViolationError) as exc_info:
+        send_production_email()
+        
+    assert "is marked @mock_only but was executed directly in a test environment without a mock" in str(exc_info.value)
+
+
+def test_mock_only_runs_outside_test_env():
+    """Verifies that @mock_only executes successfully when not running in a test environment."""
+    import sys
+    from agent_shield.sandbox import mock_only
+
+    @mock_only
+    def send_production_email():
+        return "sent"
+
+    # Backup modules
+    pytest_ref = sys.modules.pop("pytest", None)
+    unittest_ref = sys.modules.pop("unittest", None)
+
+    try:
+        assert send_production_email() == "sent"
+    finally:
+        # Restore modules
+        if pytest_ref is not None:
+            sys.modules["pytest"] = pytest_ref
+        if unittest_ref is not None:
+            sys.modules["unittest"] = unittest_ref
 
 
 
