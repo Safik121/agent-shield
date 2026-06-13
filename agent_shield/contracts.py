@@ -136,6 +136,37 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals):
                 )
             )
 
+    # 4. Hardcoded Secrets Check
+    from agent_shield.inspector import detect_hardcoded_secrets
+    secrets = detect_hardcoded_secrets(func)
+    if secrets:
+        report_and_raise(
+            violation_type="hardcoded_secret",
+            details={"hardcoded_secrets": secrets},
+            error_msg=f"Function '{func.__name__}' contains hardcoded secrets: {', '.join(secrets)}",
+            instruction=(
+                f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                f"contains hardcoded secret values: {', '.join(secrets)}. "
+                f"Storing API keys or credentials directly in source code is a critical security risk. "
+                f"Please retrieve these sensitive values from environment variables or a configuration store instead."
+            )
+        )
+
+    # 5. CPU Lockup Hazard Check
+    from agent_shield.inspector import detect_cpu_lockups
+    if detect_cpu_lockups(func):
+        report_and_raise(
+            violation_type="cpu_lockup_hazard",
+            details={"cpu_lockup_detected": True},
+            error_msg=f"Function '{func.__name__}' contains a potential infinite loop causing a CPU lockup.",
+            instruction=(
+                f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                f"contains a CPU lockup hazard (an infinite loop with no body statements modifying state or sleeping). "
+                f"This can lock up the runtime execution. "
+                f"Please ensure the loop contains a proper break condition, sleep interval, or state mutation."
+            )
+        )
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)

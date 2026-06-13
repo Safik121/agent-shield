@@ -206,6 +206,45 @@ def test_detect_cpu_lockups():
     assert detect_cpu_lockups(func_clean_while) is False
 
 
+def test_shield_detects_hardcoded_secrets():
+    # Test that @shield automatically checks for secrets
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @shield()
+        def func_with_secret():
+            api_key = "my_secret_token_12345"
+            return api_key
+    assert "contains hardcoded secrets: my_secret_token_12345" in str(exc_info.value)
+
+    # Verify JSON report structure
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["violation_type"] == "hardcoded_secret"
+    assert "my_secret_token_12345" in report["details"]["hardcoded_secrets"]
+
+
+def test_shield_detects_cpu_lockups():
+    # Test that @shield automatically checks for cpu lockups
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @shield()
+        def func_with_lockup():
+            while True:
+                pass
+    assert "contains a potential infinite loop causing a CPU lockup" in str(exc_info.value)
+
+    # Verify JSON report structure
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["violation_type"] == "cpu_lockup_hazard"
+    assert report["details"]["cpu_lockup_detected"] is True
+
+
+
 
 
 
