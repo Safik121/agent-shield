@@ -328,15 +328,47 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, and freeze."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, and prompt_inject."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
     assert hasattr(agent_shield, "freeze")
+    assert hasattr(agent_shield, "prompt_inject")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
     assert agent_shield.freeze is not None
+    assert agent_shield.prompt_inject is not None
+
+
+def test_prompt_inject():
+    """Verifies that @prompt_inject correctly injects AI architect constraints into docstrings."""
+    from agent_shield.inspector import prompt_inject
+
+    @prompt_inject("Do not modify the database connection logic.")
+    def my_db_function():
+        """This function connects to the db."""
+        return "connected"
+
+    expected_block = (
+        "=== AI ASSISTANT ARCHITECTURAL CONSTRAINT ===\n"
+        "Do not modify the database connection logic.\n"
+        "============================================="
+    )
+    
+    assert my_db_function.__doc__ is not None
+    assert expected_block in my_db_function.__doc__
+    assert "This function connects to the db." in my_db_function.__doc__
+    assert my_db_function() == "connected"
+    assert my_db_function.__name__ == "my_db_function"
+
+    # Test function without initial docstring
+    @prompt_inject("Strict rule.")
+    def empty_doc_function():
+        pass
+
+    assert empty_doc_function.__doc__ is not None
+    assert "Strict rule." in empty_doc_function.__doc__
 
 
 
