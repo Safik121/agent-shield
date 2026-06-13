@@ -327,6 +327,19 @@ def test_freeze_decorator():
         json.dump(data, f, indent=2)
 
 
+def test_package_exports():
+    """Verifies that the package root exports shield, ShieldViolationError, and freeze."""
+    import agent_shield
+    assert hasattr(agent_shield, "shield")
+    assert hasattr(agent_shield, "ShieldViolationError")
+    assert hasattr(agent_shield, "freeze")
+    
+    assert agent_shield.shield is not None
+    assert agent_shield.ShieldViolationError is not None
+    assert agent_shield.freeze is not None
+
+
+
 
 
 
