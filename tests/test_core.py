@@ -334,7 +334,7 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, and limit_memory."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, limit_memory, and restrict_network."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
@@ -346,6 +346,8 @@ def test_package_exports():
     assert hasattr(agent_shield, "TimeoutViolationError")
     assert hasattr(agent_shield, "limit_memory")
     assert hasattr(agent_shield, "MemoryViolationError")
+    assert hasattr(agent_shield, "restrict_network")
+    assert hasattr(agent_shield, "NetworkViolationError")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
@@ -357,6 +359,8 @@ def test_package_exports():
     assert agent_shield.TimeoutViolationError is not None
     assert agent_shield.limit_memory is not None
     assert agent_shield.MemoryViolationError is not None
+    assert agent_shield.restrict_network is not None
+    assert agent_shield.NetworkViolationError is not None
 
 
 def test_prompt_inject_modifies_docstring():
@@ -636,6 +640,53 @@ def test_limit_memory_passes_within_limit():
         return len(data)
 
     assert normal_function() == 5 * 1024 * 1024
+
+
+def test_restrict_network_blocks_unauthorized():
+    """Verifies that attempting to connect to a host not inallowed_hosts raises NetworkViolationError."""
+    import socket
+    from agent_shield import restrict_network, NetworkViolationError
+
+    @restrict_network(allowed_hosts=["localhost", "127.0.0.1"])
+    def unauthorized_call():
+        s = socket.socket()
+        # Trying to connect to a non-whitelisted host (google.com)
+        s.connect(("google.com", 80))
+
+    with pytest.raises(NetworkViolationError) as exc_info:
+        unauthorized_call()
+
+    assert "attempted unauthorized connection to host 'google.com'" in str(exc_info.value)
+
+    # Verify JSON report was created
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["violation_type"] == "network_violation"
+    assert report["function_name"] == "unauthorized_call"
+    assert report["details"]["attempted_host"] == "google.com"
+
+
+def test_restrict_network_permits_authorized():
+    """Verifies that connecting to a whitelisted host bypasses the decorator check and reaches socket layers."""
+    import socket
+    from agent_shield import restrict_network, NetworkViolationError
+
+    # Connect to localhost on a random port (which will raise ConnectionRefusedError,
+    # proving it bypassed the decorator and reached the socket level).
+    @restrict_network(allowed_hosts=["localhost"])
+    def authorized_call():
+        s = socket.socket()
+        s.connect(("localhost", 54321))
+
+    # Expect ConnectionRefusedError (or OSError) indicating it passed decorator whitelisting
+    with pytest.raises(OSError) as exc_info:
+        authorized_call()
+
+    # It must NOT be a NetworkViolationError
+    assert not issubclass(exc_info.type, NetworkViolationError)
 
 
 
