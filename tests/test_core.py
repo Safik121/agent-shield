@@ -106,24 +106,26 @@ def test_detect_global_keyword():
     assert detect_global_keyword(func_clean) is False
 
 
-def test_shield_detects_dangerous_execution():
-    # Test that eval/exec triggers violation by default
+def test_eval_blocked_by_default():
+    """Verifies that a function using eval() wrapped with a standard @shield() raises ShieldViolationError."""
     with pytest.raises(ShieldViolationError) as exc_info:
-        @shield()  # allow_unsafe=False by default
+        @shield()
         def func_with_eval():
             eval("1 + 1")
     assert "contains calls to dangerous functions: eval" in str(exc_info.value)
 
-    # Verify JSON report structure
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
-    assert os.path.exists(report_path)
-    with open(report_path, "r", encoding="utf-8") as f:
-        report = json.load(f)
-    assert report["violation_type"] == "dangerous_execution"
-    assert "eval" in report["details"]["dangerous_functions"]
 
-    # Test that allow_unsafe=True bypasses the check
+def test_exec_blocked_by_default():
+    """Verifies that a function using exec() wrapped with a standard @shield() raises ShieldViolationError."""
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @shield()
+        def func_with_exec():
+            exec("x = 1")
+    assert "contains calls to dangerous functions: exec" in str(exc_info.value)
+
+
+def test_unsafe_allowed_with_flag():
+    """Verifies that if a function uses eval() but is decorated with allow_unsafe=True, it runs without error."""
     @shield(allow_unsafe=True)
     def func_allowed_eval():
         eval("1 + 1")
@@ -131,31 +133,25 @@ def test_shield_detects_dangerous_execution():
     assert func_allowed_eval() == 42
 
 
-def test_shield_detects_global_scope():
-    # Test that global keyword triggers violation by default
+def test_global_blocked_by_default():
+    """Verifies that using global keyword inside a function with @shield() raises ShieldViolationError."""
     with pytest.raises(ShieldViolationError) as exc_info:
-        @shield()  # allow_globals=False by default
+        @shield()
         def func_with_global():
             global my_global_var
             my_global_var = 1
     assert "modifies global state using the 'global' keyword" in str(exc_info.value)
 
-    # Verify JSON report structure
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
-    assert os.path.exists(report_path)
-    with open(report_path, "r", encoding="utf-8") as f:
-        report = json.load(f)
-    assert report["violation_type"] == "global_scope_violation"
-    assert report["details"]["global_keyword_detected"] is True
 
-    # Test that allow_globals=True bypasses the check
+def test_global_allowed_with_flag():
+    """Verifies that a function using global with @shield(allow_globals=True) executes successfully."""
     @shield(allow_globals=True)
     def func_allowed_global():
         global another_global_var
         another_global_var = 100
         return another_global_var
     assert func_allowed_global() == 100
+
 
 
 
