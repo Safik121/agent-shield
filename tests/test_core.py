@@ -2,6 +2,12 @@ import pytest
 import os
 import json
 from agent_shield.contracts import shield, ShieldViolationError
+from agent_shield.sandbox import mock_only
+
+@mock_only
+def module_level_mock_only_func():
+    return "real-execution"
+
 
 def test_forbidden_import_raises_error():
     """Verifies that importing a forbidden module triggers ShieldViolationError at definition time."""
@@ -461,6 +467,62 @@ def test_mock_only_runs_outside_test_env():
             sys.modules["pytest"] = pytest_ref
         if unittest_ref is not None:
             sys.modules["unittest"] = unittest_ref
+
+
+def test_lock_signature_violates_on_parameter_change():
+    """Verify that if a function's parameters are modified after being locked in the JSON registry, it raises ShieldViolationError."""
+    from agent_shield.signature_lock import lock_signature
+
+    # 1. Clean the registry key if it exists
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    lockfile_path = os.path.join(project_root, "shield_reports", "locked_signatures.json")
+    
+    if os.path.exists(lockfile_path):
+        try:
+            with open(lockfile_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                data = json.loads(content) if content else {}
+        except Exception:
+            data = {}
+        data.pop("tampered_signature_func", None)
+        with open(lockfile_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            
+    # 2. Define function initially and lock it
+    @lock_signature
+    def tampered_signature_func(a: int, b: str) -> None:
+        pass
+        
+    # 3. Tamper the signature in the JSON registry
+    with open(lockfile_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data["tampered_signature_func"] = "(a: float, b: str) -> None"  # Changed a: int to a: float
+    with open(lockfile_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        
+    # 4. Redefining it with the original signature should now fail because it doesn't match the tampered registry
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @lock_signature
+        def tampered_signature_func(a: int, b: str) -> None:
+            pass
+            
+    assert "Function signature of 'tampered_signature_func' is locked by the architect" in str(exc_info.value)
+    
+    # Cleanup
+    with open(lockfile_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.pop("tampered_signature_func", None)
+    with open(lockfile_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def test_mock_only_passes_if_properly_mocked():
+    """Verify that when properly mocked using patch, the @mock_only function bypasses the wrapper."""
+    from unittest.mock import patch
+    
+    # Patch the function to return a mock value and verify it bypasses the wrapper
+    with patch(f"{__name__}.module_level_mock_only_func", return_value="mocked-value"):
+        assert module_level_mock_only_func() == "mocked-value"
 
 
 
