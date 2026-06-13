@@ -10,6 +10,10 @@ on:
       - main
       - master
 
+# 🚀 Tímhle GitHubu řekneme, aby všechny akce spustil pod Node.js 24 hned teď
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test:
     name: Run Tests
