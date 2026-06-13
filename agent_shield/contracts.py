@@ -39,12 +39,64 @@ def _get_type_name(t: typing.Any) -> str:
     return str(t)
 
 
-def shield(func):
-    """Decorator to enforce function contract boundaries at runtime.
+def shield(forbidden_imports: list[str] = None):
+    """Decorator to enforce function contract boundaries.
     
-    Currently monitors:
-    - Return type annotation vs. actual return type.
+    Supports:
+    - Definition-time: AST analysis for forbidden imports.
+    - Runtime: Return type validation against type hints.
+    
+    Usage:
+        @shield(forbidden_imports=["os"])
+        def my_func(): ...
     """
+    # Handle usage without parentheses: @shield
+    if callable(forbidden_imports):
+        func = forbidden_imports
+        return _decorator(func, None)
+        
+    def decorator(func):
+        return _decorator(func, forbidden_imports)
+        
+    return decorator
+
+
+def _decorator(func, forbidden_imports):
+    if forbidden_imports:
+        from agent_shield.inspector import find_forbidden_imports
+        violations = find_forbidden_imports(func, forbidden_imports)
+        if violations:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(current_dir)
+            reports_dir = os.path.join(project_root, "shield_reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            try:
+                func_file = inspect.getfile(func)
+                func_abs_file = os.path.abspath(func_file)
+            except Exception:
+                func_abs_file = "unknown"
+                
+            report = {
+                "violation_type": "forbidden_import",
+                "function_name": func.__name__,
+                "file_path": func_abs_file,
+                "forbidden_imports": violations,
+                "instruction": (
+                    f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                    f"contains forbidden imports: {', '.join(violations)}. "
+                    f"Please refactor the code to remove these imports or utilize allowed alternatives."
+                )
+            }
+            
+            report_path = os.path.join(reports_dir, "violation_report.json")
+            with open(report_path, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+                
+            raise ShieldViolationError(
+                f"Function '{func.__name__}' contains forbidden imports: {', '.join(violations)}"
+            )
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
