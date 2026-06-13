@@ -74,6 +74,11 @@ def cmd_status(args):
     elif violation_type == "subprocess_violation":
         forbidden = details.get("forbidden_command") or "<command>"
         print(f"  python -m agent_shield whitelist --command \"{forbidden}\"")
+    elif violation_type == "call_limit_violation":
+        print("  - Check your code for infinite loops or increase the limit_calls value in shield.yaml.")
+    elif violation_type == "secrets_leak_violation":
+        leak_type = details.get("leak_type") or "secret/PII"
+        print(f"  - Remove the leaked '{leak_type}' from the output/file/request, or check decorator options.")
     else:
         print("  Check your shield.yaml rules and add exceptions manually.")
     print("=" * 80)

@@ -125,6 +125,16 @@ def _apply_rules_to_module(module, module_name, rules):
                     if "restrict_subprocess" in rule:
                         from agent_shield.subprocess_sandbox import restrict_subprocess
                         decorated = restrict_subprocess(rule["restrict_subprocess"])(decorated)
+                        
+                    if "no_secrets_leak" in rule and rule["no_secrets_leak"]:
+                        from agent_shield.secrets_sandbox import no_secrets_leak
+                        leak_types = rule["no_secrets_leak"] if isinstance(rule["no_secrets_leak"], list) else None
+                        decorated = no_secrets_leak(leak_types)(decorated)
+                        
+                    if "limit_calls" in rule:
+                        from agent_shield.network_sandbox import limit_calls
+                        max_calls = int(rule["limit_calls"])
+                        decorated = limit_calls(max_calls)(decorated)
                 try:
                     setattr(module, attr_name, decorated)
                 except Exception:

@@ -1,16 +1,17 @@
-from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError, PromptAssertionError, FilesystemViolationError, SideEffectViolationError, ComplexityViolationError, SubprocessViolationError
+from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError, PromptAssertionError, FilesystemViolationError, SideEffectViolationError, ComplexityViolationError, SubprocessViolationError, SecretsLeakViolationError, CallLimitViolationError
 from .freezer import freeze
 from .injector import prompt_inject
 from .signature_lock import lock_signature
 from .sandbox import mock_only
 from .timeout import timeout
 from .memory_limit import limit_memory
-from .network_sandbox import restrict_network
+from .network_sandbox import restrict_network, limit_calls
 from .semantic import prompt_assert
 from .config import init_config
 from .fs_sandbox import restrict_fs
 from .side_effects import no_side_effects
 from .subprocess_sandbox import restrict_subprocess
+from .secrets_sandbox import no_secrets_leak
 
 # Auto-initialize configuration-based auto-decoration if shield.yaml is present in project root
 init_config()
@@ -26,6 +27,8 @@ __all__ = [
     "SideEffectViolationError",
     "ComplexityViolationError",
     "SubprocessViolationError",
+    "SecretsLeakViolationError",
+    "CallLimitViolationError",
     "freeze",
     "prompt_inject",
     "lock_signature",
@@ -33,9 +36,11 @@ __all__ = [
     "timeout",
     "limit_memory",
     "restrict_network",
+    "limit_calls",
     "prompt_assert",
     "init_config",
     "restrict_fs",
     "no_side_effects",
     "restrict_subprocess",
+    "no_secrets_leak",
 ]

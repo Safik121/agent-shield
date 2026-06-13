@@ -49,6 +49,16 @@ class SubprocessViolationError(ShieldViolationError):
     pass
 
 
+class SecretsLeakViolationError(ShieldViolationError):
+    """Exception raised when function attempts to leak secrets or PII."""
+    pass
+
+
+class CallLimitViolationError(ShieldViolationError):
+    """Exception raised when function exceeds allowed number of network calls."""
+    pass
+
+
 def _is_matching_type(value: typing.Any, expected_type: typing.Any) -> bool:
     """Helper to check if a value matches the expected type annotation."""
     if expected_type is inspect.Signature.empty:

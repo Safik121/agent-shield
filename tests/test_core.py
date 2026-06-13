@@ -1175,6 +1175,90 @@ rules:
         agent_shield.config._decorated_modules.clear()
 
 
+def test_limit_calls_within_budget():
+    """Verifies that network connections succeed when under the call limit."""
+    from agent_shield import limit_calls
+    import socket
+    
+    @limit_calls(max_calls=5)
+    def make_calls():
+        for _ in range(3):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.connect(("127.0.0.1", 9999))
+            except (ConnectionRefusedError, OSError):
+                pass
+                
+    make_calls()
+
+
+def test_limit_calls_exceeds_budget():
+    """Verifies that exceeding the call limit raises CallLimitViolationError."""
+    from agent_shield import limit_calls, CallLimitViolationError
+    import socket
+    
+    @limit_calls(max_calls=2)
+    def make_calls():
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        for _ in range(3):
+            try:
+                s.connect(("127.0.0.1", 9999))
+            except (ConnectionRefusedError, OSError):
+                pass
+                
+    with pytest.raises(CallLimitViolationError) as exc_info:
+        make_calls()
+        
+    assert "exceeded allowed API call limit" in str(exc_info.value)
+
+
+def test_no_secrets_leak_blocks_file_write(tmp_path):
+    """Verifies that writing a secret key to a file raises SecretsLeakViolationError."""
+    from agent_shield import no_secrets_leak, SecretsLeakViolationError
+    
+    @no_secrets_leak()
+    def write_secret():
+        file_path = tmp_path / "leak.txt"
+        with open(file_path, "w") as f:
+            f.write("My secret OpenAI key is sk-12345678901234567890")
+            
+    with pytest.raises(SecretsLeakViolationError) as exc_info:
+        write_secret()
+        
+    assert "Secrets Sandbox: Blocked transmission of OpenAI API Key" in str(exc_info.value)
+
+
+def test_no_secrets_leak_blocks_network_send():
+    """Verifies that sending PII (email) over a socket raises SecretsLeakViolationError."""
+    from agent_shield import no_secrets_leak, SecretsLeakViolationError
+    import socket
+    
+    @no_secrets_leak()
+    def send_email():
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.send(b"Contact: user@domain.com")
+        
+    with pytest.raises(SecretsLeakViolationError) as exc_info:
+        send_email()
+        
+    assert "Secrets Sandbox: Blocked transmission of Email Address" in str(exc_info.value)
+
+
+def test_no_secrets_leak_blocks_stdout():
+    """Verifies that printing a secret AWS key to stdout raises SecretsLeakViolationError."""
+    from agent_shield import no_secrets_leak, SecretsLeakViolationError
+    
+    @no_secrets_leak()
+    def print_secret():
+        print("Key is AKIA1234567890123456")
+        
+    with pytest.raises(SecretsLeakViolationError) as exc_info:
+        print_secret()
+        
+    assert "Secrets Sandbox: Blocked transmission of AWS Access Key" in str(exc_info.value)
+
+
+
 
 
 
