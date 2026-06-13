@@ -20,7 +20,7 @@ Crucially, instead of raising generic stack traces, Agent-Shield generates **str
 
 ### 1. Architectural Integrity & AST Checks
 
-*   **`@shield(allowed_imports=..., forbidden_imports=..., allow_unsafe=False, allow_globals=False)`**
+*   **`@shield(allowed_imports=..., forbidden_imports=..., allow_unsafe=False, allow_globals=False, max_complexity=None)`**
     Enforces function boundary constraints at definition time via static AST analysis:
     *   **Allowed Imports**: Whitelist only specific modules for import inside the function (relative imports allowed by default).
     *   **Forbidden Imports**: Blacklist specific modules (e.g. blocking `os` or `sys`).
@@ -28,6 +28,7 @@ Crucially, instead of raising generic stack traces, Agent-Shield generates **str
     *   **Globals Usage**: Blocks the `global` keyword to prevent global state pollution.
     *   **Hardcoded Secrets**: Scans constants for API keys (e.g., AWS, OpenAI) or variables named `api_key`/`secret`.
     *   **CPU Lockups**: Detects infinite loops with empty bodies (`while True: pass`).
+    *   **Complexity limit**: Restricts the maximum allowed cyclomatic complexity of the function's AST.
     *   **Runtime Types**: Automatically validates function return values against declared type hints (supports generics and union types).
 
 *   **`@freeze`**
@@ -49,6 +50,9 @@ Crucially, instead of raising generic stack traces, Agent-Shield generates **str
 
 *   **`@restrict_fs(allow_read: list[str] = None, allow_write: list[str] = None)`**
     Monkeypatches `builtins.open` and standard file manipulation operations. Prevents path traversal bypasses and whitelists Python interpreter/import folders so package loading remains unimpeded.
+
+*   **`@no_side_effects(allow_args_mutation=False, allow_globals=False, allow_stdout=False)`**
+    Enforces function purity. Verifies that the function does not mutate its arguments, modify module-level globals, or print output to the console. Raises `SideEffectViolationError` on violation.
 
 ### 3. AI Directives & Semantic Assertions
 
