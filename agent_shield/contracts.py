@@ -14,6 +14,11 @@ class TimeoutViolationError(ShieldViolationError):
     pass
 
 
+class MemoryViolationError(ShieldViolationError):
+    """Exception raised when function execution memory allocation exceeds the limit."""
+    pass
+
+
 def _is_matching_type(value: typing.Any, expected_type: typing.Any) -> bool:
     """Helper to check if a value matches the expected type annotation."""
     if expected_type is inspect.Signature.empty:

@@ -334,7 +334,7 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, and mock_only."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, and limit_memory."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
@@ -342,6 +342,10 @@ def test_package_exports():
     assert hasattr(agent_shield, "prompt_inject")
     assert hasattr(agent_shield, "lock_signature")
     assert hasattr(agent_shield, "mock_only")
+    assert hasattr(agent_shield, "timeout")
+    assert hasattr(agent_shield, "TimeoutViolationError")
+    assert hasattr(agent_shield, "limit_memory")
+    assert hasattr(agent_shield, "MemoryViolationError")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
@@ -349,6 +353,10 @@ def test_package_exports():
     assert agent_shield.prompt_inject is not None
     assert agent_shield.lock_signature is not None
     assert agent_shield.mock_only is not None
+    assert agent_shield.timeout is not None
+    assert agent_shield.TimeoutViolationError is not None
+    assert agent_shield.limit_memory is not None
+    assert agent_shield.MemoryViolationError is not None
 
 
 def test_prompt_inject_modifies_docstring():
@@ -582,6 +590,52 @@ def test_timeout_passes_within_limit():
         return "success"
 
     assert fast_function() == "success"
+
+
+def test_limit_memory_raises_error():
+    """Verifies that @limit_memory raises MemoryViolationError when function allocates too much memory."""
+    from agent_shield import limit_memory, MemoryViolationError
+    import time
+
+    # Let's set a low limit of 30 MB
+    @limit_memory(max_mb=30.0)
+    def memory_heavy_function():
+        # Allocate 50 MB
+        data = b"x" * (50 * 1024 * 1024)
+        # Add a tiny sleep to allow the background monitor thread to catch it
+        time.sleep(0.1)
+        return len(data)
+
+    with pytest.raises(MemoryViolationError) as exc_info:
+        memory_heavy_function()
+
+    assert "exceeded memory limit of 30.0 MB" in str(exc_info.value)
+
+    # Verify JSON report was created
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["violation_type"] == "memory_limit_exceeded"
+    assert report["function_name"] == "memory_heavy_function"
+    assert report["details"]["limit_kb"] == 30 * 1024
+
+
+def test_limit_memory_passes_within_limit():
+    """Verifies that @limit_memory allows functions executing within the memory limit to complete."""
+    from agent_shield import limit_memory
+    import time
+
+    # Set a high limit of 100 MB
+    @limit_memory(max_mb=100.0)
+    def normal_function():
+        # Allocate 5 MB
+        data = b"x" * (5 * 1024 * 1024)
+        time.sleep(0.1)
+        return len(data)
+
+    assert normal_function() == 5 * 1024 * 1024
 
 
 
