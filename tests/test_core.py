@@ -334,7 +334,7 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, limit_memory, restrict_network, prompt_assert, init_config, restrict_fs, and FilesystemViolationError."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, limit_memory, restrict_network, prompt_assert, init_config, restrict_fs, FilesystemViolationError, no_side_effects, SideEffectViolationError, and ComplexityViolationError."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
@@ -353,6 +353,9 @@ def test_package_exports():
     assert hasattr(agent_shield, "init_config")
     assert hasattr(agent_shield, "restrict_fs")
     assert hasattr(agent_shield, "FilesystemViolationError")
+    assert hasattr(agent_shield, "no_side_effects")
+    assert hasattr(agent_shield, "SideEffectViolationError")
+    assert hasattr(agent_shield, "ComplexityViolationError")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
@@ -371,6 +374,9 @@ def test_package_exports():
     assert agent_shield.init_config is not None
     assert agent_shield.restrict_fs is not None
     assert agent_shield.FilesystemViolationError is not None
+    assert agent_shield.no_side_effects is not None
+    assert agent_shield.SideEffectViolationError is not None
+    assert agent_shield.ComplexityViolationError is not None
 
 
 def test_prompt_inject_modifies_docstring():
@@ -877,6 +883,85 @@ def test_passive_shield_mode_logs_without_exception():
     finally:
         # Disable passive mode
         os.environ.pop("AGENT_SHIELD_PASSIVE", None)
+
+
+def test_shield_max_complexity_violates():
+    """Verifies that a function exceeding max_complexity triggers ComplexityViolationError at definition time."""
+    from agent_shield import shield, ComplexityViolationError
+    
+    with pytest.raises(ComplexityViolationError) as exc_info:
+        @shield(max_complexity=2)
+        def overly_complex_function(x):
+            # Base complexity = 1
+            # 3 decision points = complexity of 4
+            if x > 10:
+                if x < 20:
+                    return 1
+                else:
+                    return 2
+            elif x < 5:
+                return 3
+            return 4
+            
+    assert "has a cyclomatic complexity of 4, exceeding the limit of 2" in str(exc_info.value)
+
+
+def test_no_side_effects_mutates_arguments():
+    """Verifies that @no_side_effects prevents modifying mutable arguments."""
+    from agent_shield import no_side_effects, SideEffectViolationError
+    
+    @no_side_effects
+    def mutate_arg(my_list):
+        my_list.append("mutated")
+        return my_list
+        
+    with pytest.raises(SideEffectViolationError) as exc_info:
+        mutate_arg([])
+        
+    assert "mutated its input arguments" in str(exc_info.value)
+
+
+def test_no_side_effects_mutates_globals():
+    """Verifies that @no_side_effects prevents mutating module-level globals."""
+    from agent_shield import no_side_effects, SideEffectViolationError
+    
+    global test_global_state
+    test_global_state = "original"
+    
+    @no_side_effects
+    def mutate_global():
+        global test_global_state
+        test_global_state = "mutated"
+        
+    with pytest.raises(SideEffectViolationError) as exc_info:
+        mutate_global()
+        
+    assert "mutated module-level globals: test_global_state" in str(exc_info.value)
+
+
+def test_no_side_effects_writes_stdout():
+    """Verifies that @no_side_effects prevents printing output to console."""
+    from agent_shield import no_side_effects, SideEffectViolationError
+    
+    @no_side_effects
+    def print_to_console():
+        print("side effect output")
+        
+    with pytest.raises(SideEffectViolationError) as exc_info:
+        print_to_console()
+        
+    assert "printed output to console: 'side effect output'" in str(exc_info.value)
+
+
+def test_no_side_effects_passes_pure():
+    """Verifies that @no_side_effects allows pure functions to execute successfully."""
+    from agent_shield import no_side_effects
+    
+    @no_side_effects
+    def pure_function(x, y):
+        return x + y
+        
+    assert pure_function(2, 3) == 5
 
 
 

@@ -34,6 +34,16 @@ class FilesystemViolationError(ShieldViolationError):
     pass
 
 
+class SideEffectViolationError(ShieldViolationError):
+    """Exception raised when function causes an unauthorized side-effect."""
+    pass
+
+
+class ComplexityViolationError(ShieldViolationError):
+    """Exception raised when function exceeds maximum allowed complexity."""
+    pass
+
+
 def _is_matching_type(value: typing.Any, expected_type: typing.Any) -> bool:
     """Helper to check if a value matches the expected type annotation."""
     if expected_type is inspect.Signature.empty:
@@ -64,11 +74,17 @@ def _get_type_name(t: typing.Any) -> str:
     return str(t)
 
 
-def shield(forbidden_imports: list[str] = None, allow_unsafe: bool = False, allow_globals: bool = False, allowed_imports: list[str] = None):
+def shield(
+    forbidden_imports: list[str] = None,
+    allow_unsafe: bool = False,
+    allow_globals: bool = False,
+    allowed_imports: list[str] = None,
+    max_complexity: int = None
+):
     """Decorator to enforce function contract boundaries.
     
     Supports:
-    - Definition-time: AST analysis for forbidden imports, allowed imports, dangerous functions (eval/exec), and global scope usage.
+    - Definition-time: AST analysis for forbidden imports, allowed imports, dangerous functions (eval/exec), global scope usage, and complexity.
     - Runtime: Return type validation against type hints.
     
     Usage:
@@ -78,15 +94,15 @@ def shield(forbidden_imports: list[str] = None, allow_unsafe: bool = False, allo
     # Handle usage without parentheses: @shield
     if callable(forbidden_imports):
         func = forbidden_imports
-        return _decorator(func, None, False, False, None)
+        return _decorator(func, None, False, False, None, None)
         
     def decorator(func):
-        return _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imports)
+        return _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imports, max_complexity)
         
     return decorator
 
 
-def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imports):
+def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imports, max_complexity):
     # Locate project root and prepare reports directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
@@ -99,7 +115,7 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imp
         func_abs_file = "unknown"
 
     # Helper to generate violation report and raise error
-    def report_and_raise(violation_type: str, details: dict, error_msg: str, instruction: str):
+    def report_and_raise(violation_type: str, details: dict, error_msg: str, instruction: str, exc_class=ShieldViolationError):
         os.makedirs(reports_dir, exist_ok=True)
         report = {
             "violation_type": violation_type,
@@ -116,7 +132,7 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imp
         if is_passive:
             print(f"Warning: agent-shield passive mode violation detected: {error_msg}")
         else:
-            raise ShieldViolationError(error_msg)
+            raise exc_class(error_msg)
 
     # 1. Forbidden Imports Check
     if forbidden_imports:
@@ -212,6 +228,23 @@ def _decorator(func, forbidden_imports, allow_unsafe, allow_globals, allowed_imp
                 f"Please ensure the loop contains a proper break condition, sleep interval, or state mutation."
             )
         )
+
+    # 6. Cyclomatic Complexity Check
+    if max_complexity is not None:
+        from agent_shield.complexity import calculate_cyclomatic_complexity
+        comp = calculate_cyclomatic_complexity(func)
+        if comp > max_complexity:
+            report_and_raise(
+                violation_type="complexity_exceeded",
+                details={"complexity": comp, "max_complexity": max_complexity},
+                error_msg=f"Function '{func.__name__}' has a cyclomatic complexity of {comp}, exceeding the limit of {max_complexity}.",
+                instruction=(
+                    f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                    f"has a cyclomatic complexity of {comp}, which exceeds the limit of {max_complexity}.\n"
+                    f"Please simplify the code by refactoring branching logic (if/for/while/except) or split it into smaller functions."
+                ),
+                exc_class=ComplexityViolationError
+            )
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):

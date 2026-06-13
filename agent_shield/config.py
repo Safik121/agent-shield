@@ -113,6 +113,14 @@ def _apply_rules_to_module(module, module_name, rules):
                             allow_read=rule.get("allow_read"),
                             allow_write=rule.get("allow_write")
                         )(decorated)
+                        
+                    if "max_complexity" in rule:
+                        from agent_shield.contracts import shield
+                        decorated = shield(max_complexity=int(rule["max_complexity"]))(decorated)
+                        
+                    if "no_side_effects" in rule and rule["no_side_effects"]:
+                        from agent_shield.side_effects import no_side_effects
+                        decorated = no_side_effects(decorated)
                 try:
                     setattr(module, attr_name, decorated)
                 except Exception:
