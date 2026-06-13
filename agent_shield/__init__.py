@@ -1,4 +1,4 @@
-from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError
+from .contracts import shield, ShieldViolationError, TimeoutViolationError, MemoryViolationError, NetworkViolationError, PromptAssertionError
 from .freezer import freeze
 from .injector import prompt_inject
 from .signature_lock import lock_signature
@@ -6,6 +6,11 @@ from .sandbox import mock_only
 from .timeout import timeout
 from .memory_limit import limit_memory
 from .network_sandbox import restrict_network
+from .semantic import prompt_assert
+from .config import init_config
+
+# Auto-initialize configuration-based auto-decoration if shield.yaml is present in project root
+init_config()
 
 __all__ = [
     "shield",
@@ -13,6 +18,7 @@ __all__ = [
     "TimeoutViolationError",
     "MemoryViolationError",
     "NetworkViolationError",
+    "PromptAssertionError",
     "freeze",
     "prompt_inject",
     "lock_signature",
@@ -20,4 +26,6 @@ __all__ = [
     "timeout",
     "limit_memory",
     "restrict_network",
+    "prompt_assert",
+    "init_config",
 ]

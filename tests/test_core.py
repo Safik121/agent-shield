@@ -334,7 +334,7 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, limit_memory, and restrict_network."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, lock_signature, mock_only, timeout, limit_memory, restrict_network, prompt_assert, and init_config."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
@@ -348,6 +348,9 @@ def test_package_exports():
     assert hasattr(agent_shield, "MemoryViolationError")
     assert hasattr(agent_shield, "restrict_network")
     assert hasattr(agent_shield, "NetworkViolationError")
+    assert hasattr(agent_shield, "prompt_assert")
+    assert hasattr(agent_shield, "PromptAssertionError")
+    assert hasattr(agent_shield, "init_config")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
@@ -361,6 +364,9 @@ def test_package_exports():
     assert agent_shield.MemoryViolationError is not None
     assert agent_shield.restrict_network is not None
     assert agent_shield.NetworkViolationError is not None
+    assert agent_shield.prompt_assert is not None
+    assert agent_shield.PromptAssertionError is not None
+    assert agent_shield.init_config is not None
 
 
 def test_prompt_inject_modifies_docstring():
@@ -687,6 +693,107 @@ def test_restrict_network_permits_authorized():
 
     # It must NOT be a NetworkViolationError
     assert not issubclass(exc_info.type, NetworkViolationError)
+
+
+def test_prompt_assert_mocked_success():
+    """Verifies that @prompt_assert allows execution when the mock registry returns success."""
+    from agent_shield.semantic import register_prompt_assert_mock, clear_prompt_assert_mocks, prompt_assert
+    
+    register_prompt_assert_mock("successful_semantic_function", satisfied=True)
+    
+    try:
+        @prompt_assert("This function must compute the square of x")
+        def successful_semantic_function(x):
+            return x * x
+            
+        assert successful_semantic_function(5) == 25
+    finally:
+        clear_prompt_assert_mocks()
+
+
+def test_prompt_assert_mocked_failure():
+    """Verifies that @prompt_assert raises PromptAssertionError when semantic validation fails."""
+    from agent_shield.semantic import register_prompt_assert_mock, clear_prompt_assert_mocks, prompt_assert
+    from agent_shield import PromptAssertionError
+    
+    register_prompt_assert_mock("failed_semantic_function", satisfied=False, reason="Function contains print statements which is forbidden.")
+    
+    try:
+        with pytest.raises(PromptAssertionError) as exc_info:
+            @prompt_assert("This function must be completely pure.")
+            def failed_semantic_function():
+                print("impure side effect")
+                return 42
+                
+        assert "violated semantic constraint" in str(exc_info.value)
+        assert "Function contains print statements" in str(exc_info.value)
+        
+        # Verify JSON report was created
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        report_path = os.path.join(project_root, "shield_reports", "violation_report.json")
+        assert os.path.exists(report_path)
+        with open(report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+        assert report["violation_type"] == "prompt_assertion_violation"
+        assert report["function_name"] == "failed_semantic_function"
+        assert report["details"]["reason"] == "Function contains print statements which is forbidden."
+    finally:
+        clear_prompt_assert_mocks()
+
+
+def test_config_auto_decoration(tmp_path):
+    """Verifies that creating a shield.yaml auto-decorates modules at import time."""
+    import sys
+    from agent_shield.config import init_config
+    from agent_shield import TimeoutViolationError
+    
+    # 1. Create a dummy test file
+    dummy_code = """
+import time
+
+def my_slow_config_func():
+    time.sleep(0.5)
+    return "done"
+"""
+    dummy_file = tmp_path / "config_dummy.py"
+    dummy_file.write_text(dummy_code)
+    
+    # Add tmp_path to Python path so we can import it
+    sys.path.insert(0, str(tmp_path))
+    
+    # 2. Create shield.yaml config in tmp_path
+    config_yaml = """
+rules:
+  - pattern: "config_dummy"
+    timeout: 0.05
+"""
+    yaml_file = tmp_path / "shield.yaml"
+    yaml_file.write_text(config_yaml)
+    
+    try:
+        # Clear module status and hook up the custom config path
+        sys.modules.pop("config_dummy", None)
+        init_config(config_path=str(yaml_file))
+        
+        # 3. Import and run function
+        import config_dummy
+        
+        with pytest.raises(TimeoutViolationError) as exc_info:
+            config_dummy.my_slow_config_func()
+            
+        assert "execution timed out after 0.05 seconds" in str(exc_info.value)
+    finally:
+        # Cleanup
+        sys.path.remove(str(tmp_path))
+        sys.modules.pop("config_dummy", None)
+        # Restore default import hook
+        import builtins
+        from agent_shield.config import _original_import
+        builtins.__import__ = _original_import
+        from agent_shield.config import _hook_applied
+        import agent_shield.config
+        agent_shield.config._hook_applied = False
+        agent_shield.config._decorated_modules.clear()
 
 
 
