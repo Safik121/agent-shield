@@ -244,6 +244,39 @@ def test_shield_detects_cpu_lockups():
     assert report["details"]["cpu_lockup_detected"] is True
 
 
+def test_hardcoded_secret_blocked():
+    """Verifies that a function containing a hardcoded secret raises ShieldViolationError."""
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @shield()
+        def func_with_secret():
+            password = "my_secret_token"
+            return password
+    assert "contains hardcoded secrets: my_secret_token" in str(exc_info.value)
+
+
+def test_cpu_lockup_blocked():
+    """Verifies that a function containing an empty while True loop raises ShieldViolationError."""
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @shield()
+        def func_with_lockup():
+            while True:
+                pass
+    assert "contains a potential infinite loop causing a CPU lockup" in str(exc_info.value)
+
+
+def test_enterprise_flags_allow_execution():
+    """Verifies that allow_unsafe=True and allow_globals=True flags permit eval and global usage."""
+    @shield(allow_unsafe=True, allow_globals=True)
+    def allowed_enterprise_func() -> dict:
+        global enterprise_state
+        enterprise_state = "active"
+        eval("1 + 1")
+        return {"status": "ok"}
+
+    assert allowed_enterprise_func() == {"status": "ok"}
+
+
+
 
 
 
