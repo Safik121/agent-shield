@@ -1,4 +1,4 @@
-# Agent-Safeguard 🛡️
+# Agent-Safeguard
 
 A lightweight, enterprise-grade architectural guardrail and sandbox library for Python applications developed in collaboration with AI agents.
 
