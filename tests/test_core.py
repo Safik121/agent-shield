@@ -328,17 +328,19 @@ def test_frozen_function_tamper_detection():
 
 
 def test_package_exports():
-    """Verifies that the package root exports shield, ShieldViolationError, freeze, and prompt_inject."""
+    """Verifies that the package root exports shield, ShieldViolationError, freeze, prompt_inject, and lock_signature."""
     import agent_shield
     assert hasattr(agent_shield, "shield")
     assert hasattr(agent_shield, "ShieldViolationError")
     assert hasattr(agent_shield, "freeze")
     assert hasattr(agent_shield, "prompt_inject")
+    assert hasattr(agent_shield, "lock_signature")
     
     assert agent_shield.shield is not None
     assert agent_shield.ShieldViolationError is not None
     assert agent_shield.freeze is not None
     assert agent_shield.prompt_inject is not None
+    assert agent_shield.lock_signature is not None
 
 
 def test_prompt_inject_modifies_docstring():
@@ -369,6 +371,57 @@ def test_prompt_inject_modifies_docstring():
 
     assert empty_doc_function.__doc__ is not None
     assert "Another instruction" in empty_doc_function.__doc__
+
+
+def test_lock_signature_tamper_detection():
+    """Verifies that @lock_signature registers a signature and blocks modifications with ShieldViolationError."""
+    from agent_shield.signature_lock import lock_signature
+
+    # 1. Clean the key from registry if it exists
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    lockfile_path = os.path.join(project_root, "shield_reports", "locked_signatures.json")
+    
+    if os.path.exists(lockfile_path):
+        try:
+            with open(lockfile_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                data = json.loads(content) if content else {}
+        except Exception:
+            data = {}
+        data.pop("my_locked_function", None)
+        with open(lockfile_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            
+    # 2. Define a function and lock its signature
+    @lock_signature
+    def my_locked_function(x: int, y: str = "default") -> bool:
+        return True
+        
+    # Check that it is registered
+    assert os.path.exists(lockfile_path)
+    with open(lockfile_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert "my_locked_function" in data
+    
+    # 3. Modify the signature in the registry to simulate an unauthorized change
+    data["my_locked_function"] = "(x: float) -> bool"  # different signature
+    with open(lockfile_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        
+    # 4. Try defining the function again and verify it raises ShieldViolationError
+    with pytest.raises(ShieldViolationError) as exc_info:
+        @lock_signature
+        def my_locked_function(x: int, y: str = "default") -> bool:
+            return True
+            
+    assert "Function signature of 'my_locked_function' is locked by the architect and cannot be modified" in str(exc_info.value)
+    
+    # Cleanup
+    with open(lockfile_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.pop("my_locked_function", None)
+    with open(lockfile_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 
 
