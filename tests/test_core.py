@@ -964,4 +964,109 @@ def test_no_side_effects_passes_pure():
     assert pure_function(2, 3) == 5
 
 
+def test_cli_status_no_report(capsys, monkeypatch, tmp_path):
+    """Verifies CLI status command outputs correct message when no report exists."""
+    import agent_shield.cli
+    monkeypatch.setattr(agent_shield.cli, "find_project_root", lambda: str(tmp_path))
+    
+    code = agent_shield.cli.main(["status"])
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "No active violation reports found." in captured.out
+
+
+def test_cli_status_shows_report(capsys, monkeypatch, tmp_path):
+    """Verifies CLI status command displays report details and suggested command."""
+    import agent_shield.cli
+    monkeypatch.setattr(agent_shield.cli, "find_project_root", lambda: str(tmp_path))
+    
+    reports_dir = tmp_path / "shield_reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_file = reports_dir / "violation_report.json"
+    
+    report_data = {
+        "violation_type": "filesystem_violation",
+        "function_name": "unsafe_write",
+        "file_path": "/workspace/main.py",
+        "details": {
+            "requested_path": "/etc/passwd",
+            "operation": "write"
+        },
+        "instruction": "Do not modify critical files"
+    }
+    
+    with open(report_file, "w", encoding="utf-8") as f:
+        json.dump(report_data, f)
+        
+    code = agent_shield.cli.main(["status"])
+    assert code == 0
+    captured = capsys.readouterr()
+    
+    assert "filesystem_violation" in captured.out
+    assert "unsafe_write" in captured.out
+    assert "Do not modify critical files" in captured.out
+    assert "python -m agent_shield whitelist --path \"/etc/passwd\" --write" in captured.out
+
+
+def test_cli_whitelist_creates_yaml(monkeypatch, tmp_path):
+    """Verifies that running whitelist command creates shield.yaml with rules."""
+    import agent_shield.cli
+    monkeypatch.setattr(agent_shield.cli, "find_project_root", lambda: str(tmp_path))
+    
+    yaml_path = tmp_path / "shield.yaml"
+    assert not yaml_path.exists()
+    
+    code = agent_shield.cli.main(["whitelist", "--import", "os", "--pattern", "tests.*"])
+    assert code == 0
+    assert yaml_path.exists()
+    
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    assert 'pattern: "tests.*"' in content
+    assert 'allowed_imports: ["os"]' in content
+
+
+def test_cli_whitelist_updates_existing_yaml(monkeypatch, tmp_path):
+    """Verifies that running whitelist command updates an existing shield.yaml and removes violation report."""
+    import agent_shield.cli
+    monkeypatch.setattr(agent_shield.cli, "find_project_root", lambda: str(tmp_path))
+    
+    yaml_path = tmp_path / "shield.yaml"
+    initial_content = """rules:
+  - pattern: "*"
+    allowed_imports: ["math"]
+"""
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        f.write(initial_content)
+        
+    reports_dir = tmp_path / "shield_reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_file = reports_dir / "violation_report.json"
+    report_file.write_text("{}", encoding="utf-8")
+    
+    # 1. Whitelist another import
+    code = agent_shield.cli.main(["whitelist", "--import", "json"])
+    assert code == 0
+    
+    # 2. Whitelist a path
+    code = agent_shield.cli.main(["whitelist", "--path", "/tmp", "--read"])
+    assert code == 0
+    
+    # 3. Whitelist a host
+    code = agent_shield.cli.main(["whitelist", "--host", "api.github.com"])
+    assert code == 0
+    
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        content = f.read()
+        
+    assert 'allowed_imports: ["math", "json"]' in content
+    assert 'allow_read: ["/tmp"]' in content
+    assert 'restrict_network: ["api.github.com"]' in content
+    
+    # Check that the violation report was deleted
+    assert not report_file.exists()
+
+
+
 
