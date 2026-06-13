@@ -39,62 +39,101 @@ def _get_type_name(t: typing.Any) -> str:
     return str(t)
 
 
-def shield(forbidden_imports: list[str] = None):
+def shield(forbidden_imports: list[str] = None, allow_unsafe: bool = False, allow_globals: bool = False):
     """Decorator to enforce function contract boundaries.
     
     Supports:
-    - Definition-time: AST analysis for forbidden imports.
+    - Definition-time: AST analysis for forbidden imports, dangerous functions (eval/exec), and global scope usage.
     - Runtime: Return type validation against type hints.
     
     Usage:
-        @shield(forbidden_imports=["os"])
+        @shield(forbidden_imports=["os"], allow_unsafe=False, allow_globals=False)
         def my_func(): ...
     """
     # Handle usage without parentheses: @shield
     if callable(forbidden_imports):
         func = forbidden_imports
-        return _decorator(func, None)
+        return _decorator(func, None, False, False)
         
     def decorator(func):
-        return _decorator(func, forbidden_imports)
+        return _decorator(func, forbidden_imports, allow_unsafe, allow_globals)
         
     return decorator
 
 
-def _decorator(func, forbidden_imports):
+def _decorator(func, forbidden_imports, allow_unsafe, allow_globals):
+    # Locate project root and prepare reports directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    reports_dir = os.path.join(project_root, "shield_reports")
+    
+    try:
+        func_file = inspect.getfile(func)
+        func_abs_file = os.path.abspath(func_file)
+    except Exception:
+        func_abs_file = "unknown"
+
+    # Helper to generate violation report and raise error
+    def report_and_raise(violation_type: str, details: dict, error_msg: str, instruction: str):
+        os.makedirs(reports_dir, exist_ok=True)
+        report = {
+            "violation_type": violation_type,
+            "function_name": func.__name__,
+            "file_path": func_abs_file,
+            "details": details,
+            "instruction": instruction
+        }
+        report_path = os.path.join(reports_dir, "violation_report.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        raise ShieldViolationError(error_msg)
+
+    # 1. Forbidden Imports Check
     if forbidden_imports:
         from agent_shield.inspector import find_forbidden_imports
         violations = find_forbidden_imports(func, forbidden_imports)
         if violations:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)
-            reports_dir = os.path.join(project_root, "shield_reports")
-            os.makedirs(reports_dir, exist_ok=True)
-            
-            try:
-                func_file = inspect.getfile(func)
-                func_abs_file = os.path.abspath(func_file)
-            except Exception:
-                func_abs_file = "unknown"
-                
-            report = {
-                "violation_type": "forbidden_import",
-                "function_name": func.__name__,
-                "file_path": func_abs_file,
-                "forbidden_imports": violations,
-                "instruction": (
+            report_and_raise(
+                violation_type="forbidden_import",
+                details={"forbidden_imports": violations},
+                error_msg=f"Function '{func.__name__}' contains forbidden imports: {', '.join(violations)}",
+                instruction=(
                     f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
                     f"contains forbidden imports: {', '.join(violations)}. "
                     f"Please refactor the code to remove these imports or utilize allowed alternatives."
                 )
-            }
-            
-            report_path = os.path.join(reports_dir, "violation_report.json")
-            with open(report_path, "w", encoding="utf-8") as f:
-                json.dump(report, f, indent=2, ensure_ascii=False)
-                
-            raise ShieldViolationError(
-                f"Function '{func.__name__}' contains forbidden imports: {', '.join(violations)}"
+            )
+
+    # 2. Dangerous Functions Check
+    if not allow_unsafe:
+        from agent_shield.inspector import detect_dangerous_functions
+        violations = detect_dangerous_functions(func)
+        if violations:
+            report_and_raise(
+                violation_type="dangerous_execution",
+                details={"dangerous_functions": violations},
+                error_msg=f"Function '{func.__name__}' contains calls to dangerous functions: {', '.join(violations)}",
+                instruction=(
+                    f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                    f"contains calls to dangerous execution functions: {', '.join(violations)}. "
+                    f"Dynamic execution via eval/exec is forbidden. Please rewrite the logic without using eval or exec."
+                )
+            )
+
+    # 3. Global Scope Check
+    if not allow_globals:
+        from agent_shield.inspector import detect_global_keyword
+        if detect_global_keyword(func):
+            report_and_raise(
+                violation_type="global_scope_violation",
+                details={"global_keyword_detected": True},
+                error_msg=f"Function '{func.__name__}' modifies global state using the 'global' keyword.",
+                instruction=(
+                    f"AI Assistant Instruction: The function '{func.__name__}' in file '{func_abs_file}' "
+                    f"utilizes the 'global' keyword to modify global variables. "
+                    f"Modifying global state inside functions is prohibited. "
+                    f"Please refactor the function to pass state as parameters or return values instead."
+                )
             )
 
     @functools.wraps(func)
@@ -116,21 +155,9 @@ def _decorator(func, forbidden_imports):
             expected_name = _get_type_name(expected_type)
             actual_name = _get_type_name(type(result))
             
-            # Locate project root directory (parent of 'agent_shield' package)
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)
-            reports_dir = os.path.join(project_root, "shield_reports")
-            
             # Ensure report directory exists
             os.makedirs(reports_dir, exist_ok=True)
             
-            # Find the file path of the decorated function
-            try:
-                func_file = inspect.getfile(func)
-                func_abs_file = os.path.abspath(func_file)
-            except Exception:
-                func_abs_file = "unknown"
-                
             report = {
                 "violation_type": "return_type_mismatch",
                 "function_name": func.__name__,

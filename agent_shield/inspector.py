@@ -51,3 +51,52 @@ def find_forbidden_imports(func: typing.Callable, forbidden_modules: list[str]) 
                         found_forbidden.add(forbidden)
 
     return sorted(list(found_forbidden))
+
+
+def detect_dangerous_functions(func: typing.Callable) -> list[str]:
+    """Analyzes the AST of a function to detect calls to eval or exec.
+    
+    Args:
+        func: The function to analyze.
+        
+    Returns:
+        A list of dangerous function names ('eval', 'exec') called inside the function.
+    """
+    try:
+        source = inspect.getsource(func)
+        dedented_source = textwrap.dedent(source)
+        tree = ast.parse(dedented_source)
+    except Exception:
+        return []
+
+    dangerous_calls: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in ("eval", "exec"):
+                dangerous_calls.add(node.func.id)
+                
+    return sorted(list(dangerous_calls))
+
+
+def detect_global_keyword(func: typing.Callable) -> bool:
+    """Analyzes the AST of a function to detect the use of the global keyword.
+    
+    Args:
+        func: The function to analyze.
+        
+    Returns:
+        True if the 'global' keyword is used inside the function, False otherwise.
+    """
+    try:
+        source = inspect.getsource(func)
+        dedented_source = textwrap.dedent(source)
+        tree = ast.parse(dedented_source)
+    except Exception:
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Global):
+            return True
+            
+    return False
+
