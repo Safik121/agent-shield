@@ -4,17 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-safeguard"
-version = "1.0.1"
+version = "1.0.2"
 description = "A runtime and definition-time security guardrail framework for AI agents and developers."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [
     {name = "Charles", email = "safik112@seznam.cz"}
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Topic :: Security",
 ]
