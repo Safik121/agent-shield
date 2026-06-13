@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pyagent-shield"
+name = "agent-safeguard"
 version = "1.0.0"
 description = "A runtime and definition-time security guardrail framework for AI agents and developers."
 readme = "README.md"
