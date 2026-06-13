@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtuální prostředí
+.venv/
+venv/
+ENV/
+
+# PyCharm a IDE balast
+.idea/
+.vscode/
+.pytest_cache/
+
+# Výstupy naší knihovny
+shield_reports/
