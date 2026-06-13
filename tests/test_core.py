@@ -1258,6 +1258,30 @@ def test_no_secrets_leak_blocks_stdout():
     assert "Secrets Sandbox: Blocked transmission of AWS Access Key" in str(exc_info.value)
 
 
+def test_no_secrets_leak_large_payload_truncated(tmp_path):
+    """Verifies that large payloads are truncated and processed without memory/performance blowup."""
+    from agent_shield import no_secrets_leak, SecretsLeakViolationError
+    
+    @no_secrets_leak()
+    def write_large_data(include_secret=False):
+        file_path = tmp_path / "large.txt"
+        padding = "x" * (2500 * 1024)
+        if include_secret:
+            data = padding + "\nMy secret key is AKIA1234567890123456"
+        else:
+            data = padding
+        with open(file_path, "w") as f:
+            f.write(data)
+            
+    # 1. Writing large file without secrets should succeed
+    write_large_data(include_secret=False)
+    
+    # 2. Writing large file with secrets at the end should be caught
+    with pytest.raises(SecretsLeakViolationError):
+        write_large_data(include_secret=True)
+
+
+
 
 
 

@@ -65,36 +65,45 @@ def _check_payload_leak(thread_id, data, source_type):
         else:
             text = str(data)
             
+        # Truncate text if it is extremely large to prevent high CPU/memory usage
+        MAX_SCAN_LEN = 2000000  # 2 MB limit
+        if len(text) > MAX_SCAN_LEN:
+            text = text[:1000000] + "\n[TRUNCATED]\n" + text[-1000000:]
+            
         project_root, func, leak_types = restricted
         
         matched = None
         reason = None
         
         if "secrets" in leak_types:
-            # AWS Access Keys
-            aws_match = re.search(r'(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}', text)
-            if aws_match:
-                matched = aws_match.group(0)
-                reason = "AWS Access Key"
-            else:
-                # OpenAI Keys
-                openai_match = re.search(r'sk-[a-zA-Z0-9]{20,}', text)
-                if openai_match:
-                    matched = openai_match.group(0)
-                    reason = "OpenAI API Key"
+            # Pre-check if any expected key prefix is present
+            if any(prefix in text for prefix in ("AKIA", "AGPA", "AIDA", "AROA", "AIPA", "ANPA", "ANVA", "ASIA", "A3T", "sk-", "AIza")):
+                # AWS Access Keys
+                aws_match = re.search(r'(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}', text)
+                if aws_match:
+                    matched = aws_match.group(0)
+                    reason = "AWS Access Key"
                 else:
-                    # Google API Keys
-                    google_match = re.search(r'AIza[0-9A-Za-z-_]{35}', text)
-                    if google_match:
-                        matched = google_match.group(0)
-                        reason = "Google API Key"
-                        
+                    # OpenAI Keys
+                    openai_match = re.search(r'sk-[a-zA-Z0-9]{20,}', text)
+                    if openai_match:
+                        matched = openai_match.group(0)
+                        reason = "OpenAI API Key"
+                    else:
+                        # Google API Keys
+                        google_match = re.search(r'AIza[0-9A-Za-z-_]{35}', text)
+                        if google_match:
+                            matched = google_match.group(0)
+                            reason = "Google API Key"
+                            
         if not matched and "pii" in leak_types:
-            # Email Address Pattern
-            email_match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
-            if email_match:
-                matched = email_match.group(0)
-                reason = "Email Address"
+            # Pre-check if "@" is present in text before running the email regex
+            if "@" in text:
+                # Email Address Pattern
+                email_match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
+                if email_match:
+                    matched = email_match.group(0)
+                    reason = "Email Address"
                 
         if matched:
             _report_leak_and_raise(reason, matched, source_type, func, project_root)
