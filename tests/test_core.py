@@ -343,7 +343,7 @@ def test_package_exports():
 
 def test_prompt_inject():
     """Verifies that @prompt_inject correctly injects AI architect constraints into docstrings."""
-    from agent_shield.inspector import prompt_inject
+    from agent_shield.injector import prompt_inject
 
     @prompt_inject("Do not modify the database connection logic.")
     def my_db_function():
