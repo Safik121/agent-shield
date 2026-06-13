@@ -1,4 +1,4 @@
-# Agent-Shield 🛡️
+# Agent-Safeguard 🛡️
 
 A lightweight, enterprise-grade architectural guardrail and sandbox library for Python applications developed in collaboration with AI agents.
 
@@ -10,19 +10,42 @@ AI coding assistants (such as Antigravity, Cursor, Copilot, and Codex) excel at 
 
 ## The Solution
 
-**Agent-Shield** establishes programmatic guardrails that enforce structural and runtime invariants. By combining definition-time AST checks, dynamic socket/file monkeypatching, RAM/CPU constraints, and LLM-powered semantic assertions, it captures boundary violations immediately. 
+**Agent-Safeguard** establishes programmatic guardrails that enforce structural and runtime invariants. By combining definition-time AST checks, dynamic socket/file monkeypatching, RAM/CPU constraints, database access filters, and prompt injection guards, it captures boundary violations immediately. 
 
-Crucially, instead of raising generic stack traces, Agent-Shield generates **structured JSON reports** designed to be ingested by LLM agents, enabling closed-loop, automated self-correction.
+Crucially, instead of raising generic stack traces, Agent-Safeguard generates **structured JSON reports** designed to be ingested by LLM agents, enabling closed-loop, automated self-correction.
+
+---
+
+## Installation
+
+Install using pip:
+```bash
+pip install agent-safeguard
+```
 
 ---
 
 ## Core Features & Decorators
 
-### 1. Architectural Integrity & AST Checks
+### 1. Advanced Sandboxes & Guardrails
+
+*   **`@virtual_fs(in_memory_write=True, allow_real_read=None)`**
+    Redirects filesystem writes to an in-memory virtual storage in RAM. Filesystem reads check the virtual state first, falling back to the real disk if the path is whitelisted in `allow_real_read` (defaults to permitting all reads but redirecting all writes to RAM, perfect for safe dry-runs).
+    
+*   **`@guard_prompt(scan_input=True, scan_output=False, custom_rules=None)`**
+    Scans function inputs and outputs for prompt injection and developer mode override signatures (e.g. `"ignore previous instructions"`, `"system override"`, `"bypass safety"`). Raises `PromptInjectionViolationError` on match.
+    
+*   **`@restrict_db(read_only=True)`**
+    Intercepts `sqlite3` database connections and restricts execution to read-only queries. If a query contains write/alter keywords (e.g. `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`), blocks it and raises `DatabaseViolationError`.
+
+*   **`@restrict_env(allow_mutation=False)`**
+    Prevents modifying or deleting system environment variables (`os.environ`) during function execution, raising `EnvironmentViolationError`.
+
+### 2. Architectural Integrity & AST Checks
 
 *   **`@shield(allowed_imports=..., forbidden_imports=..., allow_unsafe=False, allow_globals=False, max_complexity=None)`**
     Enforces function boundary constraints at definition time via static AST analysis:
-    *   **Allowed Imports**: Whitelist only specific modules for import inside the function (relative imports allowed by default).
+    *   **Allowed Imports**: Whitelist only specific modules for import inside the function.
     *   **Forbidden Imports**: Blacklist specific modules (e.g. blocking `os` or `sys`).
     *   **Unsafe Execution**: Blocks calls to `eval()` and `exec()`.
     *   **Globals Usage**: Blocks the `global` keyword to prevent global state pollution.
@@ -37,13 +60,13 @@ Crucially, instead of raising generic stack traces, Agent-Shield generates **str
 *   **`@lock_signature`**
     Locks the function's signature. Saves parameter names, ordering, defaults, and type hints in `shield_reports/locked_signatures.json` to prevent AI from altering the function interface.
 
-### 2. Resource & Security Sandboxing
+### 3. Resource & Security Sandboxing
 
 *   **`@timeout(seconds: float)`**
     Enforces a strict runtime execution time limit. Bypasses signal limits gracefully when executed in background threads. Raises `TimeoutViolationError` if exceeded.
 
 *   **`@limit_memory(max_mb: float)`**
-    Monitors RSS memory growth of the process during execution. If the memory delta exceeds the specified limit, injects `MemoryViolationError` into the main thread. Includes thread-safe, re-entrant exception handling.
+    Monitors RSS memory growth of the process during execution. If the memory delta exceeds the specified limit, injects `MemoryViolationError` into the main thread.
 
 *   **`@restrict_network(allowed_hosts: list[str])`**
     Restricts socket-level connections. Monkeypatches `socket.connect` dynamically and thread-safely. Supports wildcards (e.g. `*.stripe.com`) and resolves domain IPs automatically.
@@ -54,7 +77,7 @@ Crucially, instead of raising generic stack traces, Agent-Shield generates **str
 *   **`@no_side_effects(allow_args_mutation=False, allow_globals=False, allow_stdout=False)`**
     Enforces function purity. Verifies that the function does not mutate its arguments, modify module-level globals, or print output to the console. Raises `SideEffectViolationError` on violation.
 
-### 3. AI Directives & Semantic Assertions
+### 4. AI Directives & Semantic Assertions
 
 *   **`@prompt_inject(instruction: str)`**
     Prepend a standardized, high-visibility block containing architectural instructions directly to the function's docstring:
@@ -67,7 +90,9 @@ Crucially, instead of raising generic stack traces, Agent-Shield generates **str
 *   **`@prompt_assert(prompt: str)`**
     Sends the function source code to the Gemini API (`gemini-1.5-flash`) at definition time to semantically evaluate whether the implementation satisfies the natural language prompt constraint. Supports registry mocking for offline unit testing.
 
-### 4. Centrally Configured Guardrails (`shield.yaml`)
+---
+
+### 5. Centrally Configured Guardrails (`shield.yaml`)
 
 To prevent AI agents from editing or deleting decorators from Python files, you can define your project rules centrally inside a `shield.yaml` file on the project root:
 
@@ -76,14 +101,16 @@ rules:
   - pattern: "my_app.payments.*"
     timeout: 5.0
     restrict_network: ["api.stripe.com"]
-    allow_write: ["./logs"]
+    virtual_fs: true
+    guard_prompt: true
+    restrict_db: true
   - pattern: "my_app.utils.*"
     allowed_imports: ["math", "json"]
 ```
 
-Agent-Shield hooks into Python's import system (`builtins.__import__`) and automatically decorates all matching module functions at import time.
+Agent-Safeguard hooks into Python's import system (`builtins.__import__`) and automatically decorates all matching module functions at import time.
 
-### 5. Audit Mode (Passive Mode)
+### 6. Audit Mode (Passive Mode)
 
 Set the environment variable `AGENT_SHIELD_PASSIVE=true` to enable passive auditing. Under passive mode, rules write structured JSON reports and output console warnings on violations, but **do not raise exceptions** (excluding interruptive constraints like timeout).
 
@@ -91,7 +118,7 @@ Set the environment variable `AGENT_SHIELD_PASSIVE=true` to enable passive audit
 
 ## JSON Diagnostic Reports
 
-When a constraint is violated, Agent-Shield writes a diagnostic report to `shield_reports/violation_report.json`:
+When a constraint is violated, Agent-Safeguard writes a diagnostic report to `shield_reports/violation_report.json`:
 
 ```json
 {
@@ -110,13 +137,6 @@ AI agents can read this file in a self-correction loop to rewrite their code aut
 
 ---
 
-## Installation
-
-Using pip:
-```bash
-pip install git+https://github.com/Safik121/agent-shield.git
-```
-
 ## Quick Start
 
 Create a `shield.yaml` in your project root:
@@ -127,7 +147,7 @@ rules:
     allow_read: ["/tmp"]
 ```
 
-Define your functions, and Agent-Shield handles the rest:
+Define your functions, and Agent-Safeguard handles the rest:
 ```python
 # sandbox_code.py
 def process_data():
@@ -140,4 +160,4 @@ def process_data():
 
 ## License
 
-This project is licensed under the Apache License 2.0.
+This project is licensed under the MIT License.
