@@ -276,7 +276,7 @@ def test_enterprise_flags_allow_execution():
     assert allowed_enterprise_func() == {"status": "ok"}
 
 
-def test_freeze_decorator():
+def test_frozen_function_tamper_detection():
     """Verifies that @freeze registers a function hash and blocks modifications with ShieldViolationError."""
     from agent_shield.freezer import freeze
 
