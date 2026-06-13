@@ -23,6 +23,11 @@ Install using pip:
 pip install agent-safeguard
 ```
 
+Import it in your Python code using `agent_shield`:
+```python
+from agent_shield import virtual_fs, guard_prompt
+```
+
 ---
 
 ## Core Features & Decorators
